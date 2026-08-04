@@ -1,13 +1,14 @@
 # Copyright Contributors to the Pyro project.
 # SPDX-License-Identifier: Apache-2.0
 
+import numbers
 from functools import singledispatch
 
 import torch
 from torch.distributions import transform_to, transforms
 
 import pyro.distributions as dist
-from pyro.infer.reparam import HaarReparam, DiscreteCosineReparam
+from pyro.infer.reparam import DiscreteCosineReparam, HaarReparam
 from pyro.poutine.messenger import Messenger
 from pyro.poutine.util import site_is_subsample
 from pyro.primitives import get_param_store
@@ -47,6 +48,7 @@ class MarkDCTParamMessenger(Messenger):
     :param str name: The name of the plate along which to apply discrete cosine
         transforms on gradients.
     """
+
     def __init__(self, name):
         super().__init__()
         self.name = name
@@ -71,6 +73,7 @@ class PrefixWarmStartMessenger(Messenger):
     defined on a short time window, re-initialize by splicing old params with
     new initial params defined on a longer time window.
     """
+
     def _pyro_param(self, msg):
         store = get_param_store()
         name = msg["name"]
@@ -100,7 +103,7 @@ class PrefixWarmStartMessenger(Messenger):
             if new.size(dim) != old.size(dim):
                 break
         assert new.size(dim) > old.size(dim)
-        assert new.shape[dim + 1:] == old.shape[dim + 1:]
+        assert new.shape[dim + 1 :] == old.shape[dim + 1 :]
         split = old.size(dim)
         index = (slice(None),) * dim + (slice(split, None),)
         new = torch.cat([old, new[index]], dim=dim)
@@ -117,6 +120,7 @@ class PrefixReplayMessenger(Messenger):
     :param trace: a guide trace.
     :type trace: ~pyro.poutine.trace_struct.Trace
     """
+
     def __init__(self, trace):
         super().__init__()
         self.trace = trace
@@ -141,7 +145,7 @@ class PrefixReplayMessenger(Messenger):
             if model_value.size(dim) != guide_value.size(dim):
                 break
         assert model_value.size(dim) > guide_value.size(dim)
-        assert model_value.shape[dim + 1:] == guide_value.shape[dim + 1:]
+        assert model_value.shape[dim + 1 :] == guide_value.shape[dim + 1 :]
         split = guide_value.size(dim)
         index = (slice(None),) * dim + (slice(split, None),)
         msg["value"] = torch.cat([guide_value, model_value[index]], dim=dim)
@@ -154,6 +158,7 @@ class PrefixConditionMessenger(Messenger):
 
     :param dict data: A dict mapping site name to tensors of observations.
     """
+
     def __init__(self, data):
         super().__init__()
         self.data = data
@@ -190,6 +195,7 @@ UNIVARIATE_DISTS = {
     dist.Poisson: ("rate",),
     dist.Stable: ("stability", "skew", "scale", "loc"),
     dist.StudentT: ("df", "loc", "scale"),
+    dist.Uniform: ("low", "high"),
     dist.ZeroInflatedPoisson: ("rate", "gate"),
     dist.ZeroInflatedNegativeBinomial: ("total_count", "logits", "gate"),
 }
@@ -212,7 +218,16 @@ def prefix_condition(d, data):
     try:
         return d.prefix_condition(data)
     except AttributeError as e:
-        raise NotImplementedError("prefix_condition() does not suport {}".format(type(d))) from e
+        raise NotImplementedError(
+            "prefix_condition() does not suport {}".format(type(d))
+        ) from e
+
+
+@prefix_condition.register(dist.MaskedDistribution)
+def _(d, data):
+    base_dist = prefix_condition(d.base_dist, data)
+    mask = d._mask[tuple(slice(-size, None) for size in base_dist.batch_shape)]
+    return base_dist.mask(mask)
 
 
 @prefix_condition.register(dist.Independent)
@@ -234,10 +249,17 @@ def _(d, data):
     return dist.FoldedDistribution(base_dist)
 
 
+@prefix_condition.register(dist.TransformedDistribution)
+def _(d, data):
+    for t in reversed(d.transforms):
+        data = t.inv(data)
+    base_dist = prefix_condition(d.base_dist, data)
+    return dist.TransformedDistribution(base_dist, d.transforms)
+
+
 def _prefix_condition_univariate(d, data):
     t = data.size(-2)
-    params = {name: getattr(d, name)[..., t:, :]
-              for name in UNIVARIATE_DISTS[type(d)]}
+    params = {name: getattr(d, name)[..., t:, :] for name in UNIVARIATE_DISTS[type(d)]}
     return type(d)(**params)
 
 
@@ -272,9 +294,18 @@ def reshape_batch(d, batch_shape):
     raise NotImplementedError("reshape_batch() does not suport {}".format(type(d)))
 
 
+@reshape_batch.register(dist.MaskedDistribution)
+def _(d, batch_shape):
+    mask = d._mask
+    if not isinstance(d._mask, numbers.Number):
+        mask = mask.reshape(batch_shape)
+    base_dist = reshape_batch(d.base_dist, batch_shape)
+    return base_dist.mask(mask)
+
+
 @reshape_batch.register(dist.Independent)
 def _(d, batch_shape):
-    base_shape = batch_shape + d.event_shape[:d.reinterpreted_batch_ndims]
+    base_shape = batch_shape + d.event_shape[: d.reinterpreted_batch_ndims]
     base_dist = reshape_batch(d.base_dist, base_shape)
     return base_dist.to_event(d.reinterpreted_batch_ndims)
 
@@ -292,10 +323,23 @@ def _(d, batch_shape):
     return dist.FoldedDistribution(base_dist)
 
 
+@reshape_batch.register(dist.TransformedDistribution)
+def _(d, batch_shape):
+    base_dist = reshape_batch(d.base_dist, batch_shape)
+    old_shape = d.base_dist.shape()
+    new_shape = base_dist.shape()
+    transforms = [
+        reshape_transform_batch(t, old_shape, new_shape) for t in d.transforms
+    ]
+    return dist.TransformedDistribution(base_dist, transforms)
+
+
 def _reshape_batch_univariate(d, batch_shape):
     batch_shape = batch_shape + (-1,) * d.event_dim
-    params = {name: getattr(d, name).reshape(batch_shape)
-              for name in UNIVARIATE_DISTS[type(d)]}
+    params = {
+        name: getattr(d, name).reshape(batch_shape)
+        for name in UNIVARIATE_DISTS[type(d)]
+    }
     return type(d)(**params)
 
 
@@ -334,15 +378,18 @@ def _(d, batch_shape):
     new._init = init
     new._trans = trans
     new._obs = obs
-    super(dist.GaussianHMM, new).__init__(d.duration, batch_shape, d.event_shape,
-                                          validate_args=d._validate_args)
+    super(dist.GaussianHMM, new).__init__(
+        d.duration, batch_shape, d.event_shape, validate_args=d._validate_args
+    )
     return new
 
 
 @reshape_batch.register(dist.LinearHMM)
 def _(d, batch_shape):
     init_dist = reshape_batch(d.initial_dist, batch_shape)
-    trans_mat = d.transition_matrix.reshape(batch_shape + (-1, d.hidden_dim, d.hidden_dim))
+    trans_mat = d.transition_matrix.reshape(
+        batch_shape + (-1, d.hidden_dim, d.hidden_dim)
+    )
     trans_dist = reshape_batch(d.transition_dist, batch_shape + (-1,))
     obs_mat = d.observation_matrix.reshape(batch_shape + (-1, d.hidden_dim, d.obs_dim))
     obs_dist = reshape_batch(d.observation_dist, batch_shape + (-1,))
@@ -357,15 +404,17 @@ def _(d, batch_shape):
     new.observation_dist = obs_dist
     transforms = []
     for transform in d.transforms:
-        assert type(transform) in UNIVARIATE_TRANSFORMS, \
-            "Currently, reshape_batch only supports AbsTransform, " + \
-            "ExpTransform, SigmoidTransform transform"
+        assert type(transform) in UNIVARIATE_TRANSFORMS, (
+            "Currently, reshape_batch only supports AbsTransform, "
+            + "ExpTransform, SigmoidTransform transform"
+        )
         old_shape = d.observation_dist.shape()
         new_shape = obs_dist.shape()
         transforms.append(reshape_transform_batch(transform, old_shape, new_shape))
     new.transforms = transforms
-    super(dist.LinearHMM, new).__init__(d.duration, batch_shape, d.event_shape,
-                                        validate_args=d._validate_args)
+    super(dist.LinearHMM, new).__init__(
+        d.duration, batch_shape, d.event_shape, validate_args=d._validate_args
+    )
     return new
 
 
@@ -394,14 +443,32 @@ def reshape_transform_batch(t, old_shape, new_shape):
     :returns: A transform with the same type but given new batch shape.
     :rtype: ~torch.distributions.transforms.Transform
     """
-    raise NotImplementedError("reshape_transform_batch() does not suport {}".format(type(t)))
+    raise NotImplementedError(
+        "reshape_transform_batch() does not suport {}".format(type(t))
+    )
 
 
 def _reshape_batch_univariate_transform(t, old_shape, new_shape):
-    params = {name: getattr(t, name).expand(old_shape).reshape(new_shape)
-              for name in UNIVARIATE_TRANSFORMS[type(t)]}
+    params = {}
+    for name in UNIVARIATE_TRANSFORMS[type(t)]:
+        value = getattr(t, name)
+        if not isinstance(value, numbers.Number):
+            value = value.expand(old_shape).reshape(new_shape)
+        params[name] = value
     params["cache_size"] = t._cache_size
     return type(t)(**params)
+
+
+@reshape_transform_batch.register(torch.distributions.transforms._InverseTransform)
+def _(t, old_shape, new_shape):
+    return reshape_transform_batch(t.inv, old_shape, new_shape).inv
+
+
+@reshape_transform_batch.register(dist.transforms.ComposeTransform)
+def _(t, old_shape, new_shape):
+    return dist.transforms.ComposeTransform(
+        [reshape_transform_batch(part, old_shape, new_shape) for part in t.parts]
+    )
 
 
 for _type in UNIVARIATE_TRANSFORMS:

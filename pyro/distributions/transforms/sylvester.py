@@ -3,11 +3,11 @@
 
 import torch
 import torch.nn as nn
-from torch.distributions import constraints
 
-from pyro.distributions.torch_transform import TransformModule
-from pyro.distributions.transforms.householder import Householder
-from pyro.distributions.util import copy_docs_from
+from .. import constraints
+from ..torch_transform import TransformModule
+from ..util import copy_docs_from
+from .householder import Householder
 
 
 @copy_docs_from(TransformModule)
@@ -56,21 +56,20 @@ class Sylvester(Householder):
     domain = constraints.real_vector
     codomain = constraints.real_vector
     bijective = True
-    event_dim = 1
 
     def __init__(self, input_dim, count_transforms=1):
         super().__init__(input_dim, count_transforms)
 
         # Create parameters for Sylvester transform
-        self.R_dense = nn.Parameter(torch.Tensor(input_dim, input_dim))
-        self.S_dense = nn.Parameter(torch.Tensor(input_dim, input_dim))
-        self.R_diag = nn.Parameter(torch.Tensor(input_dim))
-        self.S_diag = nn.Parameter(torch.Tensor(input_dim))
-        self.b = nn.Parameter(torch.Tensor(input_dim))
+        self.R_dense = nn.Parameter(torch.empty(input_dim, input_dim))
+        self.S_dense = nn.Parameter(torch.empty(input_dim, input_dim))
+        self.R_diag = nn.Parameter(torch.empty(input_dim))
+        self.S_diag = nn.Parameter(torch.empty(input_dim))
+        self.b = nn.Parameter(torch.empty(input_dim))
 
         # Register masks and indices
         triangular_mask = torch.triu(torch.ones(input_dim, input_dim), diagonal=1)
-        self.register_buffer('triangular_mask', triangular_mask)
+        self.register_buffer("triangular_mask", triangular_mask)
 
         self._cached_logDetJ = None
         self.tanh = nn.Tanh()
@@ -78,7 +77,7 @@ class Sylvester(Householder):
 
     # Derivative of hyperbolic tan
     def dtanh_dx(self, x):
-        return 1. - self.tanh(x).pow(2)
+        return 1.0 - self.tanh(x).pow(2)
 
     # Construct upper diagonal R matrix
     def R(self):
@@ -91,11 +90,14 @@ class Sylvester(Householder):
     # Construct orthonomal matrix using Householder flow
     def Q(self, x):
         u = self.u()
-        partial_Q = torch.eye(self.input_dim, dtype=x.dtype, layout=x.layout,
-                              device=x.device) - 2. * torch.ger(u[0], u[0])
+        partial_Q = torch.eye(
+            self.input_dim, dtype=x.dtype, layout=x.layout, device=x.device
+        ) - 2.0 * torch.outer(u[0], u[0])
 
         for idx in range(1, self.u_unnormed.size(-2)):
-            partial_Q = torch.matmul(partial_Q, torch.eye(self.input_dim) - 2. * torch.ger(u[idx], u[idx]))
+            partial_Q = torch.matmul(
+                partial_Q, torch.eye(self.input_dim) - 2.0 * torch.outer(u[idx], u[idx])
+            )
 
         return partial_Q
 
@@ -123,7 +125,9 @@ class Sylvester(Householder):
         preactivation = torch.matmul(x, B) + self.b
         y = x + torch.matmul(self.tanh(preactivation), A)
 
-        self._cached_logDetJ = torch.log1p(self.dtanh_dx(preactivation) * R.diagonal() * S.diagonal() + 1e-8).sum(-1)
+        self._cached_logDetJ = torch.log1p(
+            self.dtanh_dx(preactivation) * R.diagonal() * S.diagonal() + 1e-8
+        ).sum(-1)
         return y
 
     def _inverse(self, y):
@@ -136,7 +140,9 @@ class Sylvester(Householder):
         cached on the forward call)
         """
 
-        raise KeyError("Sylvester object expected to find key in intermediates cache but didn't")
+        raise KeyError(
+            "Sylvester object expected to find key in intermediates cache but didn't"
+        )
 
     def log_abs_det_jacobian(self, x, y):
         """

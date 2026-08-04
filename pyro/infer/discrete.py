@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import functools
+import warnings
 from collections import OrderedDict
 
 from opt_einsum import shared_intermediates
@@ -37,7 +38,9 @@ class SamplePosteriorMessenger(ReplayMessenger):
             msg["cond_indep_stack"] = self.trace.nodes[msg["name"]]["cond_indep_stack"]
 
 
-def _sample_posterior(model, first_available_dim, temperature, *args, **kwargs):
+def _sample_posterior(
+    model, first_available_dim, temperature, strict_enumeration_warning, *args, **kwargs
+):
     # For internal use by infer_discrete.
 
     # Create an enumerated trace.
@@ -47,10 +50,14 @@ def _sample_posterior(model, first_available_dim, temperature, *args, **kwargs):
     enum_trace.compute_log_prob()
     enum_trace.pack_tensors()
 
-    return _sample_posterior_from_trace(model, enum_trace, temperature, *args, **kwargs)
+    return _sample_posterior_from_trace(
+        model, enum_trace, temperature, strict_enumeration_warning, *args, **kwargs
+    )
 
 
-def _sample_posterior_from_trace(model, enum_trace, temperature, *args, **kwargs):
+def _sample_posterior_from_trace(
+    model, enum_trace, temperature, strict_enumeration_warning, *args, **kwargs
+):
     plate_to_symbol = enum_trace.plate_to_symbol
 
     # Collect a set of query sample sites to which the backward algorithm will propagate.
@@ -61,14 +68,17 @@ def _sample_posterior_from_trace(model, enum_trace, temperature, *args, **kwargs
     enum_terms = OrderedDict()
     for node in enum_trace.nodes.values():
         if node["type"] == "sample":
-            ordinal = frozenset(plate_to_symbol[f.name]
-                                for f in node["cond_indep_stack"]
-                                if f.vectorized and f.size > 1)
+            ordinal = frozenset(
+                plate_to_symbol[f.name]
+                for f in node["cond_indep_stack"]
+                if f.vectorized and f.size > 1
+            )
             # For sites that depend on an enumerated variable, we need to apply
             # the mask but not the scale when sampling.
             if "masked_log_prob" not in node["packed"]:
                 node["packed"]["masked_log_prob"] = packed.scale_and_mask(
-                    node["packed"]["unscaled_log_prob"], mask=node["packed"]["mask"])
+                    node["packed"]["unscaled_log_prob"], mask=node["packed"]["mask"]
+                )
             log_prob = node["packed"]["masked_log_prob"]
             sum_dims.update(frozenset(log_prob._pyro_dims) - ordinal)
             if sum_dims.isdisjoint(log_prob._pyro_dims):
@@ -84,6 +94,13 @@ def _sample_posterior_from_trace(model, enum_trace, temperature, *args, **kwargs
                 queries.append(log_prob)
                 require_backward(log_prob)
 
+    if strict_enumeration_warning and not enum_terms:
+        warnings.warn(
+            "infer_discrete found no sample sites configured for enumeration. "
+            "If you want to enumerate sites, you need to @config_enumerate or set "
+            'infer={"enumerate": "sequential"} or infer={"enumerate": "parallel"}.'
+        )
+
     # We take special care to match the term ordering in
     # pyro.infer.traceenum_elbo._compute_model_factors() to allow
     # contract_tensor_tree() to use shared_intermediates() inside
@@ -97,7 +114,9 @@ def _sample_posterior_from_trace(model, enum_trace, temperature, *args, **kwargs
     cache = getattr(enum_trace, "_sharing_cache", {})
     ring = _make_ring(temperature, cache, dim_to_size)
     with shared_intermediates(cache):
-        log_probs = contract_tensor_tree(log_probs, sum_dims, ring=ring)  # run forward algorithm
+        log_probs = contract_tensor_tree(
+            log_probs, sum_dims, ring=ring
+        )  # run forward algorithm
     query_to_ordinal = {}
     pending = object()  # a constant value for pending queries
     for query in queries:
@@ -108,7 +127,10 @@ def _sample_posterior_from_trace(model, enum_trace, temperature, *args, **kwargs
                 term._pyro_backward()  # run backward algorithm
         # Note: this is quadratic in number of ordinals
         for query in queries:
-            if query not in query_to_ordinal and query._pyro_backward_result is not pending:
+            if (
+                query not in query_to_ordinal
+                and query._pyro_backward_result is not pending
+            ):
                 query_to_ordinal[query] = ordinal
 
     # Construct a collapsed trace by gathering and adjusting cond_indep_stack.
@@ -129,18 +151,25 @@ def _sample_posterior_from_trace(model, enum_trace, temperature, *args, **kwargs
                 # Adjust the cond_indep_stack.
                 ordinal = query_to_ordinal[log_prob]
                 new_node["cond_indep_stack"] = tuple(
-                    f for f in node["cond_indep_stack"]
-                    if not (f.vectorized and f.size > 1) or plate_to_symbol[f.name] in ordinal)
+                    f
+                    for f in node["cond_indep_stack"]
+                    if not (f.vectorized and f.size > 1)
+                    or plate_to_symbol[f.name] in ordinal
+                )
 
                 # Gather if node depended on an enumerated value.
                 sample = log_prob._pyro_backward_result
                 if sample is not None:
-                    new_value = packed.pack(node["value"], node["infer"]["_dim_to_symbol"])
+                    new_value = packed.pack(
+                        node["value"], node["infer"]["_dim_to_symbol"]
+                    )
                     for index, dim in zip(jit_iter(sample), sample._pyro_sample_dims):
                         if dim in new_value._pyro_dims:
                             index._pyro_dims = sample._pyro_dims[1:]
                             new_value = packed.gather(new_value, index, dim)
-                    new_node["value"] = packed.unpack(new_value, enum_trace.symbol_to_dim)
+                    new_node["value"] = packed.unpack(
+                        new_value, enum_trace.symbol_to_dim
+                    )
 
             collapsed_trace.add_node(node["name"], **new_node)
 
@@ -149,7 +178,9 @@ def _sample_posterior_from_trace(model, enum_trace, temperature, *args, **kwargs
         return model(*args, **kwargs)
 
 
-def infer_discrete(fn=None, first_available_dim=None, temperature=1):
+def infer_discrete(
+    fn=None, first_available_dim=None, temperature=1, *, strict_enumeration_warning=True
+):
     """
     A poutine that samples discrete sites marked with
     ``site["infer"]["enumerate"] = "parallel"`` from the posterior,
@@ -181,13 +212,23 @@ def infer_discrete(fn=None, first_available_dim=None, temperature=1):
         This should be a negative integer.
     :param int temperature: Either 1 (sample via forward-filter backward-sample)
         or 0 (optimize via Viterbi-like MAP inference). Defaults to 1 (sample).
+    :param bool strict_enumeration_warning: Whether to warn in case no
+        enumerated sample sites are found. Defalts to True.
     """
     assert first_available_dim < 0, first_available_dim
     if fn is None:  # support use as a decorator
-        return functools.partial(infer_discrete,
-                                 first_available_dim=first_available_dim,
-                                 temperature=temperature)
-    return functools.partial(_sample_posterior, fn, first_available_dim, temperature)
+        return functools.partial(
+            infer_discrete,
+            first_available_dim=first_available_dim,
+            temperature=temperature,
+        )
+    return functools.partial(
+        _sample_posterior,
+        fn,
+        first_available_dim,
+        temperature,
+        strict_enumeration_warning,
+    )
 
 
 class TraceEnumSample_ELBO(TraceEnum_ELBO):
@@ -211,9 +252,9 @@ class TraceEnumSample_ELBO(TraceEnum_ELBO):
                            first_available_dim=-2)(*args, **kwargs)
 
     """
+
     def _get_trace(self, model, guide, args, kwargs):
-        model_trace, guide_trace = super()._get_trace(
-            model, guide, args, kwargs)
+        model_trace, guide_trace = super()._get_trace(model, guide, args, kwargs)
 
         # Mark all sample sites with require_backward to gather enumerated
         # sites and adjust cond_indep_stack of all sample sites.
@@ -232,4 +273,11 @@ class TraceEnumSample_ELBO(TraceEnum_ELBO):
         model, model_trace, guide_trace, args, kwargs = self._saved_state
         model = poutine.replay(model, guide_trace)
         temperature = 1
-        return _sample_posterior_from_trace(model, model_trace, temperature, *args, **kwargs)
+        return _sample_posterior_from_trace(
+            model,
+            model_trace,
+            temperature,
+            self.strict_enumeration_warning,
+            *args,
+            **kwargs
+        )

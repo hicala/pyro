@@ -4,9 +4,6 @@
 import os
 import sys
 
-import sphinx_rtd_theme
-
-
 # import pkg_resources
 
 # -*- coding: utf-8 -*-
@@ -27,7 +24,7 @@ import sphinx_rtd_theme
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
-sys.path.insert(0, os.path.abspath('../..'))
+sys.path.insert(0, os.path.abspath("../.."))
 
 # -- General configuration ------------------------------------------------
 
@@ -39,15 +36,17 @@ sys.path.insert(0, os.path.abspath('../..'))
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
-    'sphinx.ext.intersphinx',  #
-    'sphinx.ext.todo',  #
-    'sphinx.ext.mathjax',  #
-    'sphinx.ext.ifconfig',  #
-    'sphinx.ext.viewcode',  #
-    'sphinx.ext.githubpages',  #
-    'sphinx.ext.graphviz',  #
-    'sphinx.ext.autodoc',
-    'sphinx.ext.doctest',
+    "sphinx.ext.intersphinx",  #
+    "sphinx.ext.todo",  #
+    "sphinx.ext.mathjax",  #
+    "sphinx.ext.ifconfig",  #
+    "sphinx.ext.viewcode",  #
+    "sphinx.ext.githubpages",  #
+    "sphinx.ext.graphviz",  #
+    "sphinx.ext.autodoc",
+    "sphinx.ext.doctest",
+    'sphinx.ext.napoleon',
+    "sphinx_copybutton",
 ]
 
 # Disable documentation inheritance so as to avoid inheriting
@@ -57,31 +56,32 @@ extensions = [
 autodoc_inherit_docstrings = False
 
 # Add any paths that contain templates here, relative to this directory.
-templates_path = ['_templates']
+templates_path = ["_templates"]
 
 # The suffix(es) of source filenames.
 # You can specify multiple suffix as a list of string:
 #
 # source_suffix = ['.rst', '.md']
-source_suffix = '.rst'
+source_suffix = ".rst"
 
 # The master toctree document.
-master_doc = 'index'
+master_doc = "index"
 
 # General information about the project.
-project = u'Pyro'
-copyright = u'2017-2018, Uber Technologies, Inc'
-author = u'Uber AI Labs'
+project = u"Pyro"
+copyright = u"2017-2018, Uber Technologies, Inc"
+author = u"Uber AI Labs"
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
 # built documents.
 
-version = ''
+version = ""
 
-if 'READTHEDOCS' not in os.environ:
+if "READTHEDOCS" not in os.environ:
     # if developing locally, use pyro.__version__ as version
-    from pyro import __version__  # noqaE402
+    from pyro import __version__  # noqa: E402
+
     version = __version__
 
 # release version
@@ -92,7 +92,7 @@ release = version
 #
 # This is also used if you do content translation via gettext catalogs.
 # Usually you set "language" from the command line for these cases.
-language = None
+language = "en"
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
@@ -100,7 +100,7 @@ language = None
 exclude_patterns = []
 
 # The name of the Pygments (syntax highlighting) style to use.
-pygments_style = 'sphinx'
+pygments_style = "sphinx"
 
 # If true, `todo` and `todoList` produce output, else they produce nothing.
 todo_include_todos = True
@@ -111,36 +111,35 @@ add_module_names = False
 # -- Options for HTML output ----------------------------------------------
 
 # logo
-html_logo = '_static/img/pyro_logo_wide.png'
+html_logo = "_static/img/pyro_logo_wide.png"
 
 # logo
-html_favicon = '_static/img/favicon/favicon.ico'
+html_favicon = "_static/img/favicon/favicon.ico"
 
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
 #
 html_theme = "sphinx_rtd_theme"
-html_theme_path = [sphinx_rtd_theme.get_html_theme_path()]
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
 # documentation.
 
 html_theme_options = {
-    'navigation_depth': 3,
-    'logo_only': True,
+    "navigation_depth": 3,
+    "logo_only": True,
 }
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
-html_static_path = ['_static']
-html_style = 'css/pyro.css'
+html_static_path = ["_static"]
+html_style = "css/pyro.css"
 
 # -- Options for HTMLHelp output ------------------------------------------
 
 # Output file base name for HTML help builder.
-htmlhelp_basename = 'Pyrodoc'
+htmlhelp_basename = "Pyrodoc"
 
 # -- Options for LaTeX output ---------------------------------------------
 
@@ -148,15 +147,12 @@ latex_elements = {
     # The paper size ('letterpaper' or 'a4paper').
     #
     # 'papersize': 'letterpaper',
-
     # The font size ('10pt', '11pt' or '12pt').
     #
     # 'pointsize': '10pt',
-
     # Additional stuff for the LaTeX preamble.
     #
     # 'preamble': '',
-
     # Latex figure (float) alignment
     #
     # 'figure_align': 'htbp',
@@ -166,14 +162,14 @@ latex_elements = {
 # (source start file, target name, title,
 #  author, documentclass [howto, manual, or own class]).
 latex_documents = [
-    (master_doc, 'Pyro.tex', u'Pyro Documentation', u'Uber AI Labs', 'manual'),
+    (master_doc, "Pyro.tex", u"Pyro Documentation", u"Uber AI Labs", "manual"),
 ]
 
 # -- Options for manual page output ---------------------------------------
 
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
-man_pages = [(master_doc, 'pyro', u'Pyro Documentation', [author], 1)]
+man_pages = [(master_doc, "pyro", u"Pyro Documentation", [author], 1)]
 
 # -- Options for Texinfo output -------------------------------------------
 
@@ -181,19 +177,27 @@ man_pages = [(master_doc, 'pyro', u'Pyro Documentation', [author], 1)]
 # (source start file, target name, title, author,
 #  dir menu entry, description, category)
 texinfo_documents = [
-    (master_doc, 'Pyro', u'Pyro Documentation', author, 'Pyro',
-     'Deep Universal Probabilistic Programming.', 'Miscellaneous'),
+    (
+        master_doc,
+        "Pyro",
+        u"Pyro Documentation",
+        author,
+        "Pyro",
+        "Deep Universal Probabilistic Programming.",
+        "Miscellaneous",
+    ),
 ]
 
 # Example configuration for intersphinx: refer to the Python standard library.
 intersphinx_mapping = {
-    'python': ('https://docs.python.org/3/', None),
-    'torch': ('https://pytorch.org/docs/master/', None),
-    'funsor': ('http://funsor.pyro.ai/en/stable/', None),
-    'opt_einsum': ('https://optimized-einsum.readthedocs.io/en/stable/', None),
-    'scipy': ('https://docs.scipy.org/doc/scipy/reference/', None),
-    'Bio': ('https://biopython.readthedocs.io/en/latest/', None),
-    'horovod': ('https://horovod.readthedocs.io/en/stable/', None),
+    "python": ("https://docs.python.org/3/", None),
+    "torch": ("https://pytorch.org/docs/main/", None),
+    "funsor": ("https://funsor.pyro.ai/en/stable/", None),
+    "opt_einsum": ("https://optimized-einsum.readthedocs.io/en/stable/", None),
+    "scipy": ("https://docs.scipy.org/doc/scipy/", None),
+    "Bio": ("https://biopython.org/docs/latest/", None),
+    "horovod": ("https://horovod.readthedocs.io/en/stable/", None),
+    "graphviz": ("https://graphviz.readthedocs.io/en/stable/", None),
 }
 
 # document class constructors (__init__ methods):
@@ -206,12 +210,17 @@ def skip(app, what, name, obj, skip, options):
 
 
 def setup(app):
-    app.add_stylesheet('css/pyro.css')
+    app.add_css_file("css/pyro.css")
+
+
 #     app.connect("autodoc-skip-member", skip)
 
 
 # @jpchen's hack to get rtd builder to install latest pytorch
 # See similar line in the install section of .travis.yml
-if 'READTHEDOCS' in os.environ:
-    os.system('pip install torch==1.5.0+cpu torchvision==0.6.0+cpu '
-              '-f https://download.pytorch.org/whl/torch_stable.html')
+if "READTHEDOCS" in os.environ:
+    os.system("pip install numpy")
+    os.system(
+        "pip install torch==2.0+cpu torchvision==0.15.0+cpu "
+        "-f https://download.pytorch.org/whl/torch_stable.html"
+    )

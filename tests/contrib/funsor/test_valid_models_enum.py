@@ -1,10 +1,10 @@
 # Copyright Contributors to the Pyro project.
 # SPDX-License-Identifier: Apache-2.0
 
-from collections import defaultdict
 import contextlib
 import logging
 import os
+from collections import defaultdict
 from queue import LifoQueue
 
 import pytest
@@ -19,11 +19,13 @@ from pyro.util import check_traceenum_requirements
 # put all funsor-related imports here, so test collection works without funsor
 try:
     import funsor
+
     import pyro.contrib.funsor
     from pyro.contrib.funsor.handlers.runtime import _DIM_STACK
+
     funsor.set_backend("torch")
     from pyroapi import distributions as dist
-    from pyroapi import infer, handlers, pyro, pyro_backend
+    from pyroapi import handlers, infer, pyro, pyro_backend
 except ImportError:
     pytestmark = pytest.mark.skip(reason="funsor is not installed")
 
@@ -50,21 +52,38 @@ def assert_ok(model, guide=None, max_plate_nesting=None, **kwargs):
     while not q_pyro.empty() and not q_funsor.empty():
         with pyro_backend("pyro"):
             with handlers.enum(first_available_dim=-max_plate_nesting - 1):
-                guide_tr_pyro = handlers.trace(handlers.queue(
-                    guide, q_pyro, escape_fn=iter_discrete_escape, extend_fn=iter_discrete_extend
-                )).get_trace(**kwargs)
-                tr_pyro = handlers.trace(handlers.replay(model, trace=guide_tr_pyro)).get_trace(**kwargs)
+                guide_tr_pyro = handlers.trace(
+                    handlers.queue(
+                        guide,
+                        q_pyro,
+                        escape_fn=iter_discrete_escape,
+                        extend_fn=iter_discrete_extend,
+                    )
+                ).get_trace(**kwargs)
+                tr_pyro = handlers.trace(
+                    handlers.replay(model, trace=guide_tr_pyro)
+                ).get_trace(**kwargs)
 
         with pyro_backend("contrib.funsor"):
             with handlers.enum(first_available_dim=-max_plate_nesting - 1):
-                guide_tr_funsor = handlers.trace(handlers.queue(
-                    guide, q_funsor, escape_fn=iter_discrete_escape, extend_fn=iter_discrete_extend
-                )).get_trace(**kwargs)
-                tr_funsor = handlers.trace(handlers.replay(model, trace=guide_tr_funsor)).get_trace(**kwargs)
+                guide_tr_funsor = handlers.trace(
+                    handlers.queue(
+                        guide,
+                        q_funsor,
+                        escape_fn=iter_discrete_escape,
+                        extend_fn=iter_discrete_extend,
+                    )
+                ).get_trace(**kwargs)
+                tr_funsor = handlers.trace(
+                    handlers.replay(model, trace=guide_tr_funsor)
+                ).get_trace(**kwargs)
 
         # make sure all dimensions were cleaned up
         assert _DIM_STACK.local_frame is _DIM_STACK.global_frame
-        assert not _DIM_STACK.global_frame.name_to_dim and not _DIM_STACK.global_frame.dim_to_name
+        assert (
+            not _DIM_STACK.global_frame.name_to_dim
+            and not _DIM_STACK.global_frame.dim_to_name
+        )
         assert _DIM_STACK.outermost is None
 
         tr_pyro = prune_subsample_sites(tr_pyro.copy())
@@ -73,20 +92,21 @@ def assert_ok(model, guide=None, max_plate_nesting=None, **kwargs):
 
 
 def _check_traces(tr_pyro, tr_funsor):
-
     assert tr_pyro.nodes.keys() == tr_funsor.nodes.keys()
     tr_pyro.compute_log_prob()
     tr_funsor.compute_log_prob()
     tr_pyro.pack_tensors()
 
     symbol_to_name = {
-        node['infer']['_enumerate_symbol']: name
+        node["infer"]["_enumerate_symbol"]: name
         for name, node in tr_pyro.nodes.items()
-        if node['type'] == 'sample' and not node['is_observed']
-        and node['infer'].get('enumerate') == 'parallel'
+        if node["type"] == "sample"
+        and not node["is_observed"]
+        and node["infer"].get("enumerate") == "parallel"
     }
-    symbol_to_name.update({
-        symbol: name for name, symbol in tr_pyro.plate_to_symbol.items()})
+    symbol_to_name.update(
+        {symbol: name for name, symbol in tr_pyro.plate_to_symbol.items()}
+    )
 
     if _NAMED_TEST_STRENGTH >= 1:
         # coarser check: enumeration requirements satisfied
@@ -95,78 +115,106 @@ def _check_traces(tr_pyro, tr_funsor):
         try:
             # coarser check: number of elements and squeezed shapes
             for name, pyro_node in tr_pyro.nodes.items():
-                if pyro_node['type'] != 'sample':
+                if pyro_node["type"] != "sample":
                     continue
                 funsor_node = tr_funsor.nodes[name]
-                assert pyro_node['packed']['log_prob'].numel() == funsor_node['log_prob'].numel()
-                assert pyro_node['packed']['log_prob'].shape == funsor_node['log_prob'].squeeze().shape
-                assert frozenset(f for f in pyro_node['cond_indep_stack'] if f.vectorized) == \
-                    frozenset(f for f in funsor_node['cond_indep_stack'] if f.vectorized)
+                assert (
+                    pyro_node["packed"]["log_prob"].numel()
+                    == funsor_node["log_prob"].numel()
+                )
+                assert (
+                    pyro_node["packed"]["log_prob"].shape
+                    == funsor_node["log_prob"].squeeze().shape
+                )
+                assert frozenset(
+                    f for f in pyro_node["cond_indep_stack"] if f.vectorized
+                ) == frozenset(
+                    f for f in funsor_node["cond_indep_stack"] if f.vectorized
+                )
         except AssertionError:
             for name, pyro_node in tr_pyro.nodes.items():
-                if pyro_node['type'] != 'sample':
+                if pyro_node["type"] != "sample":
                     continue
                 funsor_node = tr_funsor.nodes[name]
-                pyro_packed_shape = pyro_node['packed']['log_prob'].shape
-                funsor_packed_shape = funsor_node['log_prob'].squeeze().shape
+                pyro_packed_shape = pyro_node["packed"]["log_prob"].shape
+                funsor_packed_shape = funsor_node["log_prob"].squeeze().shape
                 if pyro_packed_shape != funsor_packed_shape:
                     err_str = "==> (dep mismatch) {}".format(name)
                 else:
                     err_str = name
-                print(err_str, "Pyro: {} vs Funsor: {}".format(pyro_packed_shape, funsor_packed_shape))
+                print(
+                    err_str,
+                    "Pyro: {} vs Funsor: {}".format(
+                        pyro_packed_shape, funsor_packed_shape
+                    ),
+                )
             raise
 
     if _NAMED_TEST_STRENGTH >= 2:
         try:
             # medium check: unordered packed shapes match
             for name, pyro_node in tr_pyro.nodes.items():
-                if pyro_node['type'] != 'sample':
+                if pyro_node["type"] != "sample":
                     continue
                 funsor_node = tr_funsor.nodes[name]
-                pyro_names = frozenset(symbol_to_name[d] for d in pyro_node['packed']['log_prob']._pyro_dims)
-                funsor_names = frozenset(funsor_node['funsor']['log_prob'].inputs)
-                assert pyro_names == frozenset(name.replace('__PARTICLES', '') for name in funsor_names)
+                pyro_names = frozenset(
+                    symbol_to_name[d]
+                    for d in pyro_node["packed"]["log_prob"]._pyro_dims
+                )
+                funsor_names = frozenset(funsor_node["funsor"]["log_prob"].inputs)
+                assert pyro_names == frozenset(
+                    name.replace("__PARTICLES", "") for name in funsor_names
+                )
         except AssertionError:
             for name, pyro_node in tr_pyro.nodes.items():
-                if pyro_node['type'] != 'sample':
+                if pyro_node["type"] != "sample":
                     continue
                 funsor_node = tr_funsor.nodes[name]
-                pyro_names = frozenset(symbol_to_name[d] for d in pyro_node['packed']['log_prob']._pyro_dims)
-                funsor_names = frozenset(funsor_node['funsor']['log_prob'].inputs)
+                pyro_names = frozenset(
+                    symbol_to_name[d]
+                    for d in pyro_node["packed"]["log_prob"]._pyro_dims
+                )
+                funsor_names = frozenset(funsor_node["funsor"]["log_prob"].inputs)
                 if pyro_names != funsor_names:
                     err_str = "==> (packed mismatch) {}".format(name)
                 else:
                     err_str = name
-                print(err_str, "Pyro: {} vs Funsor: {}".format(sorted(tuple(pyro_names)), sorted(tuple(funsor_names))))
+                print(
+                    err_str,
+                    "Pyro: {} vs Funsor: {}".format(
+                        sorted(tuple(pyro_names)), sorted(tuple(funsor_names))
+                    ),
+                )
             raise
 
     if _NAMED_TEST_STRENGTH >= 3:
         try:
             # finer check: exact match with unpacked Pyro shapes
             for name, pyro_node in tr_pyro.nodes.items():
-                if pyro_node['type'] != 'sample':
+                if pyro_node["type"] != "sample":
                     continue
                 funsor_node = tr_funsor.nodes[name]
-                assert pyro_node['log_prob'].shape == funsor_node['log_prob'].shape
-                assert pyro_node['value'].shape == funsor_node['value'].shape
+                assert pyro_node["log_prob"].shape == funsor_node["log_prob"].shape
+                assert pyro_node["value"].shape == funsor_node["value"].shape
         except AssertionError:
             for name, pyro_node in tr_pyro.nodes.items():
-                if pyro_node['type'] != 'sample':
+                if pyro_node["type"] != "sample":
                     continue
                 funsor_node = tr_funsor.nodes[name]
-                pyro_shape = pyro_node['log_prob'].shape
-                funsor_shape = funsor_node['log_prob'].shape
+                pyro_shape = pyro_node["log_prob"].shape
+                funsor_shape = funsor_node["log_prob"].shape
                 if pyro_shape != funsor_shape:
                     err_str = "==> (unpacked mismatch) {}".format(name)
                 else:
                     err_str = name
-                print(err_str, "Pyro: {} vs Funsor: {}".format(pyro_shape, funsor_shape))
+                print(
+                    err_str, "Pyro: {} vs Funsor: {}".format(pyro_shape, funsor_shape)
+                )
             raise
 
 
 @pytest.mark.parametrize("history", [1, 2, 3])
 def test_enum_recycling_chain_iter(history):
-
     @infer.config_enumerate
     def model():
         p = torch.tensor([[0.2, 0.8], [0.1, 0.9]])
@@ -181,14 +229,18 @@ def test_enum_recycling_chain_iter(history):
 
 @pytest.mark.parametrize("history", [2, 3])
 def test_enum_recycling_chain_iter_interleave_parallel_sequential(history):
-
     def model():
         p = torch.tensor([[0.2, 0.8], [0.1, 0.9]])
 
         xs = [0]
         for t in pyro.markov(range(10), history=history):
-            xs.append(pyro.sample("x_{}".format(t), dist.Categorical(p[xs[-1]]),
-                                  infer={"enumerate": ("sequential", "parallel")[t % 2]}))
+            xs.append(
+                pyro.sample(
+                    "x_{}".format(t),
+                    dist.Categorical(p[xs[-1]]),
+                    infer={"enumerate": ("sequential", "parallel")[t % 2]},
+                )
+            )
         assert all(x.dim() <= history + 1 for x in xs[1:])
 
     assert_ok(model, max_plate_nesting=0)
@@ -196,7 +248,6 @@ def test_enum_recycling_chain_iter_interleave_parallel_sequential(history):
 
 @pytest.mark.parametrize("history", [1, 2, 3])
 def test_enum_recycling_chain_while(history):
-
     @infer.config_enumerate
     def model():
         p = torch.tensor([[0.2, 0.8], [0.1, 0.9]])
@@ -214,7 +265,6 @@ def test_enum_recycling_chain_while(history):
 
 @pytest.mark.parametrize("history", [1, 2, 3])
 def test_enum_recycling_chain_recur(history):
-
     @infer.config_enumerate
     def model():
         p = torch.tensor([[0.2, 0.8], [0.1, 0.9]])
@@ -232,8 +282,8 @@ def test_enum_recycling_chain_recur(history):
     assert_ok(model, max_plate_nesting=0)
 
 
-@pytest.mark.parametrize('use_vindex', [False, True])
-@pytest.mark.parametrize('markov', [False, True])
+@pytest.mark.parametrize("use_vindex", [False, True])
+@pytest.mark.parametrize("markov", [False, True])
 def test_enum_recycling_dbn(markov, use_vindex):
     #    x --> x --> x  enum "state"
     # y  |  y  |  y  |  enum "occlusion"
@@ -256,8 +306,9 @@ def test_enum_recycling_dbn(markov, use_vindex):
             else:
                 z_ind = torch.arange(4, dtype=torch.long)
                 probs = r[x.unsqueeze(-1), y.unsqueeze(-1), z_ind]
-            pyro.sample("z_{}".format(t), dist.Categorical(probs),
-                        obs=torch.tensor(0.))
+            pyro.sample(
+                "z_{}".format(t), dist.Categorical(probs), obs=torch.tensor(0.0)
+            )
 
     assert_ok(model, max_plate_nesting=0)
 
@@ -305,7 +356,7 @@ def test_enum_recycling_nested():
 
 @pytest.mark.xfail(reason="Pyro behavior here appears to be incorrect")
 @pytest.mark.parametrize("grid_size", [4, 20])
-@pytest.mark.parametrize('use_vindex', [False, True])
+@pytest.mark.parametrize("use_vindex", [False, True])
 def test_enum_recycling_grid(grid_size, use_vindex):
     #  x---x---x---x    -----> i
     #  |   |   |   |   |
@@ -326,38 +377,39 @@ def test_enum_recycling_grid(grid_size, use_vindex):
                     probs = Vindex(p)[x[i - 1, j], x[i, j - 1]]
                 else:
                     ind = torch.arange(2, dtype=torch.long)
-                    probs = p[x[i - 1, j].unsqueeze(-1),
-                              x[i, j - 1].unsqueeze(-1), ind]
-                x[i, j] = pyro.sample("x_{}_{}".format(i, j),
-                                      dist.Categorical(probs))
+                    probs = p[x[i - 1, j].unsqueeze(-1), x[i, j - 1].unsqueeze(-1), ind]
+                x[i, j] = pyro.sample("x_{}_{}".format(i, j), dist.Categorical(probs))
 
     assert_ok(model, max_plate_nesting=0)
 
 
-@pytest.mark.parametrize('max_plate_nesting', [0, 1, 2])
+@pytest.mark.parametrize("max_plate_nesting", [0, 1, 2])
 @pytest.mark.parametrize("depth", [3, 5, 7])
-@pytest.mark.parametrize('history', [1, 2])
+@pytest.mark.parametrize("history", [1, 2])
 def test_enum_recycling_reentrant_history(max_plate_nesting, depth, history):
     data = (True, False)
     for i in range(depth):
         data = (data, data, False)
 
     def model_(**kwargs):
-
         @pyro.markov(history=history)
         def model(data, state=0, address=""):
             if isinstance(data, bool):
                 p = pyro.param("p_leaf", torch.ones(10))
-                pyro.sample("leaf_{}".format(address),
-                            dist.Bernoulli(p[state]),
-                            obs=torch.tensor(1. if data else 0.))
+                pyro.sample(
+                    "leaf_{}".format(address),
+                    dist.Bernoulli(p[state]),
+                    obs=torch.tensor(1.0 if data else 0.0),
+                )
             else:
                 assert isinstance(data, tuple)
                 p = pyro.param("p_branch", torch.ones(10, 10))
                 for branch, letter in zip(data, "abcdefg"):
-                    next_state = pyro.sample("branch_{}".format(address + letter),
-                                             dist.Categorical(p[state]),
-                                             infer={"enumerate": "parallel"})
+                    next_state = pyro.sample(
+                        "branch_{}".format(address + letter),
+                        dist.Categorical(p[state]),
+                        infer={"enumerate": "parallel"},
+                    )
                     model(branch, next_state, address + letter)
 
         return model(**kwargs)
@@ -365,7 +417,7 @@ def test_enum_recycling_reentrant_history(max_plate_nesting, depth, history):
     assert_ok(model_, max_plate_nesting=max_plate_nesting, data=data)
 
 
-@pytest.mark.parametrize('max_plate_nesting', [0, 1, 2])
+@pytest.mark.parametrize("max_plate_nesting", [0, 1, 2])
 @pytest.mark.parametrize("depth", [3, 5, 7])
 def test_enum_recycling_mutual_recursion(max_plate_nesting, depth):
     data = (True, False)
@@ -373,12 +425,13 @@ def test_enum_recycling_mutual_recursion(max_plate_nesting, depth):
         data = (data, data, False)
 
     def model_(**kwargs):
-
         def model_leaf(data, state=0, address=""):
             p = pyro.param("p_leaf", torch.ones(10))
-            pyro.sample("leaf_{}".format(address),
-                        dist.Bernoulli(p[state]),
-                        obs=torch.tensor(1. if data else 0.))
+            pyro.sample(
+                "leaf_{}".format(address),
+                dist.Bernoulli(p[state]),
+                obs=torch.tensor(1.0 if data else 0.0),
+            )
 
         @pyro.markov
         def model1(data, state=0, address=""):
@@ -387,9 +440,11 @@ def test_enum_recycling_mutual_recursion(max_plate_nesting, depth):
             else:
                 p = pyro.param("p_branch", torch.ones(10, 10))
                 for branch, letter in zip(data, "abcdefg"):
-                    next_state = pyro.sample("branch_{}".format(address + letter),
-                                             dist.Categorical(p[state]),
-                                             infer={"enumerate": "parallel"})
+                    next_state = pyro.sample(
+                        "branch_{}".format(address + letter),
+                        dist.Categorical(p[state]),
+                        infer={"enumerate": "parallel"},
+                    )
                     model2(branch, next_state, address + letter)
 
         @pyro.markov
@@ -399,9 +454,11 @@ def test_enum_recycling_mutual_recursion(max_plate_nesting, depth):
             else:
                 p = pyro.param("p_branch", torch.ones(10, 10))
                 for branch, letter in zip(data, "abcdefg"):
-                    next_state = pyro.sample("branch_{}".format(address + letter),
-                                             dist.Categorical(p[state]),
-                                             infer={"enumerate": "parallel"})
+                    next_state = pyro.sample(
+                        "branch_{}".format(address + letter),
+                        dist.Categorical(p[state]),
+                        infer={"enumerate": "parallel"},
+                    )
                     model1(branch, next_state, address + letter)
 
         return model1(**kwargs)
@@ -409,23 +466,24 @@ def test_enum_recycling_mutual_recursion(max_plate_nesting, depth):
     assert_ok(model_, max_plate_nesting=0, data=data)
 
 
-@pytest.mark.parametrize('max_plate_nesting', [0, 1, 2])
+@pytest.mark.parametrize("max_plate_nesting", [0, 1, 2])
 def test_enum_recycling_interleave(max_plate_nesting):
-
     def model():
         with pyro.markov() as m:
             with pyro.markov():
                 with m:  # error here
-                    pyro.sample("x", dist.Categorical(torch.ones(4)),
-                                infer={"enumerate": "parallel"})
+                    pyro.sample(
+                        "x",
+                        dist.Categorical(torch.ones(4)),
+                        infer={"enumerate": "parallel"},
+                    )
 
     assert_ok(model, max_plate_nesting=max_plate_nesting)
 
 
-@pytest.mark.parametrize('max_plate_nesting', [0, 1, 2])
-@pytest.mark.parametrize('history', [2, 3])
+@pytest.mark.parametrize("max_plate_nesting", [0, 1, 2])
+@pytest.mark.parametrize("history", [2, 3])
 def test_markov_history(max_plate_nesting, history):
-
     @infer.config_enumerate
     def model():
         p = pyro.param("p", 0.25 * torch.ones(2, 2))
@@ -434,8 +492,12 @@ def test_markov_history(max_plate_nesting, history):
         x_curr = torch.tensor(0)
         for t in pyro.markov(range(10), history=history):
             probs = p[x_prev, x_curr]
-            x_prev, x_curr = x_curr, pyro.sample("x_{}".format(t), dist.Bernoulli(probs)).long()
-            pyro.sample("y_{}".format(t), dist.Bernoulli(q[x_curr]),
-                        obs=torch.tensor(0.))
+            x_prev, x_curr = (
+                x_curr,
+                pyro.sample("x_{}".format(t), dist.Bernoulli(probs)).long(),
+            )
+            pyro.sample(
+                "y_{}".format(t), dist.Bernoulli(q[x_curr]), obs=torch.tensor(0.0)
+            )
 
     assert_ok(model, max_plate_nesting=max_plate_nesting)

@@ -5,7 +5,6 @@ from collections import namedtuple
 
 import torch
 
-
 SymmArrowhead = namedtuple("SymmArrowhead", ["top", "bottom_diag"])
 TriuArrowhead = namedtuple("TriuArrowhead", ["top", "bottom_diag"])
 
@@ -33,18 +32,24 @@ def sqrt(x):
     num_attempts = 6
     for i in range(num_attempts):
         B_Dsqrt = B / Dsqrt.unsqueeze(-2)  # shape: head_size x N
-        schur_complement = A - B_Dsqrt.matmul(B_Dsqrt.t())  # complexity: head_size^2 x N
+        schur_complement = A - B_Dsqrt.matmul(
+            B_Dsqrt.t()
+        )  # complexity: head_size^2 x N
         # we will decompose schur_complement to U @ U.T (so that the sqrt matrix
         # is upper triangular) using some `flip` operators:
         #   flip(cholesky(flip(schur_complement)))
         try:
-            top_left = torch.flip(torch.cholesky(torch.flip(schur_complement, (-2, -1))), (-2, -1))
+            top_left = torch.flip(
+                torch.linalg.cholesky(torch.flip(schur_complement, (-2, -1))), (-2, -1)
+            )
             break
         except RuntimeError:
             B = B / 2
             continue
-        raise RuntimeError("Singular schur complement in computing Cholesky of the input"
-                           " arrowhead matrix")
+        raise RuntimeError(
+            "Singular schur complement in computing Cholesky of the input"
+            " arrowhead matrix"
+        )
 
     top_right = B_Dsqrt
     top = torch.cat([top_left, top_right], -1)
@@ -69,7 +74,7 @@ def triu_inverse(x):
     B_Dinv = B / x.bottom_diag.unsqueeze(-2)
 
     identity = torch.eye(head_size, dtype=A.dtype, device=A.device)
-    top_left = torch.triangular_solve(identity, A, upper=True)[0]
+    top_left = torch.linalg.solve_triangular(A, identity, upper=True)
     top_right = -top_left.matmul(B_Dinv)  # complexity: head_size^2 x N
     top = torch.cat([top_left, top_right], -1)
     bottom_diag = x.bottom_diag.reciprocal()

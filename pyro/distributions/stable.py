@@ -7,6 +7,7 @@ import torch
 from torch.distributions import constraints
 from torch.distributions.utils import broadcast_all
 
+from pyro.distributions.stable_log_prob import _stable_log_prob
 from pyro.distributions.torch_distribution import TorchDistribution
 
 
@@ -26,8 +27,11 @@ def _unsafe_standard_stable(alpha, beta, V, W, coords):
     b = beta * ha.tan()
     # +/- `ha` term to keep the precision of alpha * (V + half_pi) when V ~ -half_pi
     v = b.atan() - ha + alpha * (V + half_pi)
-    Z = v.sin() / ((1 + b * b).rsqrt() * V.cos()).pow(inv_alpha) \
+    Z = (
+        v.sin()
+        / ((1 + b * b).rsqrt() * V.cos()).pow(inv_alpha)
         * ((v - V).cos().clamp(min=eps) / W).pow(inv_alpha - 1)
+    )
     Z.data[Z.data != Z.data] = 0  # drop occasional NANs
 
     # Optionally convert to Nolan's parametrization S^0 where samples depend
@@ -55,10 +59,12 @@ def _standard_stable(alpha, beta, aux_uniform, aux_exponential, coords):
     """
     # Determine whether a hole workaround is needed.
     with torch.no_grad():
-        hole = 1.
+        hole = 1.0
         near_hole = (alpha - hole).abs() <= RADIUS
     if not torch._C._get_tracing_state() and not near_hole.any():
-        return _unsafe_standard_stable(alpha, beta, aux_uniform, aux_exponential, coords=coords)
+        return _unsafe_standard_stable(
+            alpha, beta, aux_uniform, aux_exponential, coords=coords
+        )
     if coords == "S":
         # S coords are discontinuous, so interpolate instead in S0 coords.
         Z = _standard_stable(alpha, beta, aux_uniform, aux_exponential, "S0")
@@ -81,7 +87,9 @@ def _standard_stable(alpha, beta, aux_uniform, aux_exponential, coords):
         #              2 * RADIUS
         weights = (alpha_ - alpha.unsqueeze(-1)).abs_().mul_(-1 / (2 * RADIUS)).add_(1)
         weights[~near_hole] = 0.5
-    pairs = _unsafe_standard_stable(alpha_, beta_, aux_uniform_, aux_exponential_, coords=coords)
+    pairs = _unsafe_standard_stable(
+        alpha_, beta_, aux_uniform_, aux_exponential_, coords=coords
+    )
     return (pairs * weights).sum(-1)
 
 
@@ -97,9 +105,12 @@ class Stable(TorchDistribution):
     pass ``coords="S"``, but BEWARE this is discontinuous at ``stability=1``
     and has poor geometry for inference.
 
-    This implements a reparametrized sampler :meth:`rsample` , but does not
-    implement :meth:`log_prob` . Inference can be performed using either
-    likelihood-free algorithms such as
+    This implements a reparametrized sampler :meth:`rsample` , and a relatively
+    expensive :meth:`log_prob` calculation by numerical integration which makes
+    inference slow (compared to other distributions) , but with better
+    convergence properties especially for :math:`\alpha`-stable distributions
+    that are skewed (see the ``skew`` parameter below). Faster
+    inference can be performed using either likelihood-free algorithms such as
     :class:`~pyro.infer.energy_distance.EnergyDistance`, or reparameterization
     via the :func:`~pyro.poutine.handlers.reparam` handler with one of the
     reparameterizers :class:`~pyro.infer.reparam.stable.LatentStableReparam` ,
@@ -108,6 +119,13 @@ class Stable(TorchDistribution):
 
         with poutine.reparam(config={"x": StableReparam()}):
             pyro.sample("x", Stable(stability, skew, scale, loc))
+
+    or simply wrap in :class:`~pyro.infer.reparam.strategies.MinimalReparam` or
+    :class:`~pyro.infer.reparam.strategies.AutoReparam` , e.g.::
+
+        @MinimalReparam()
+        def model():
+            ...
 
     [1] S. Borak, W. Hardle, R. Weron (2005).
         Stable distributions.
@@ -119,7 +137,7 @@ class Stable(TorchDistribution):
         Simulating Skewed Stable Random Variables.
     [4] J.P. Nolan (2017).
         Stable Distributions: Models for Heavy Tailed Data.
-        http://fs2.american.edu/jpnolan/www/stable/chap1.pdf
+        https://edspace.american.edu/jpnolan/wp-content/uploads/sites/1720/2020/09/Chap1.pdf
 
     :param Tensor stability: Levy stability parameter :math:`\alpha\in(0,2]` .
     :param Tensor skew: Skewness :math:`\beta\in[-1,1]` .
@@ -130,17 +148,23 @@ class Stable(TorchDistribution):
     :param str coords: Either "S0" (default) to use Nolan's continuous S0
         parametrization, or "S" to use the discontinuous parameterization.
     """
+
     has_rsample = True
-    arg_constraints = {"stability": constraints.interval(0, 2),  # half-open (0, 2]
-                       "skew": constraints.interval(-1, 1),  # closed [-1, 1]
-                       "scale": constraints.positive,
-                       "loc": constraints.real}
+    arg_constraints = {
+        "stability": constraints.interval(0, 2),  # half-open (0, 2]
+        "skew": constraints.interval(-1, 1),  # closed [-1, 1]
+        "scale": constraints.positive,
+        "loc": constraints.real,
+    }
     support = constraints.real
 
-    def __init__(self, stability, skew, scale=1.0, loc=0.0, coords="S0", validate_args=None):
+    def __init__(
+        self, stability, skew, scale=1.0, loc=0.0, coords="S0", validate_args=None
+    ):
         assert coords in ("S", "S0"), coords
         self.stability, self.skew, self.scale, self.loc = broadcast_all(
-            stability, skew, scale, loc)
+            stability, skew, scale, loc
+        )
         self.coords = coords
         super().__init__(self.loc.shape, validate_args=validate_args)
 
@@ -155,7 +179,32 @@ class Stable(TorchDistribution):
         return new
 
     def log_prob(self, value):
-        raise NotImplementedError("Stable.log_prob() is not implemented")
+        r"""Implemented by numerical integration that is based on the algorithm
+        proposed by Chambers, Mallows and Stuck (CMS) for simulating the
+        Levy :math:`\alpha`-stable distribution. The CMS algorithm involves a
+        nonlinear transformation of two independent random variables into
+        one stable random variable. The first random variable is uniformly
+        distributed while the second is exponentially distributed. The numerical
+        integration is performed over the first uniformly distributed random
+        variable.
+        """
+        if self._validate_args:
+            self._validate_sample(value)
+
+        # Undo shift and scale
+        value = (value - self.loc) / self.scale
+        value_dtype = value.dtype
+
+        # Use double precision math
+        alpha = self.stability.double()
+        beta = self.skew.double()
+        value = value.double()
+
+        alpha, beta, value = broadcast_all(alpha, beta, value)
+
+        log_prob = _stable_log_prob(alpha, beta, value, self.coords)
+
+        return log_prob.to(dtype=value_dtype) - self.scale.log()
 
     def rsample(self, sample_shape=torch.Size()):
         # Draw parameter-free noise.
@@ -166,17 +215,32 @@ class Stable(TorchDistribution):
             aux_exponential = new_empty(shape).exponential_()
 
         # Differentiably transform.
-        x = _standard_stable(self.stability, self.skew, aux_uniform, aux_exponential, coords=self.coords)
+        x = _standard_stable(
+            self.stability, self.skew, aux_uniform, aux_exponential, coords=self.coords
+        )
         return self.loc + self.scale * x
 
     @property
     def mean(self):
         result = self.loc
         if self.coords == "S0":
-            result = result - self.scale * self.skew * (math.pi / 2 * self.stability).tan()
+            result = (
+                result - self.scale * self.skew * (math.pi / 2 * self.stability).tan()
+            )
         return result.masked_fill(self.stability <= 1, math.nan)
 
     @property
     def variance(self):
         var = self.scale * self.scale
         return var.mul(2).masked_fill(self.stability < 2, math.inf)
+
+
+class StableWithLogProb(Stable):
+    r"""
+    Same as :class:`Stable` but will not undergo reparameterization by
+    :class:`~pyro.infer.reparam.strategies.MinimalReparam` and will fail
+    reparametrization by
+    :class:`~pyro.infer.reparam.stable.LatentStableReparam` ,
+    :class:`~pyro.infer.reparam.stable.SymmetricStableReparam` , or
+    :class:`~pyro.infer.reparam.stable.StableReparam`.
+    """

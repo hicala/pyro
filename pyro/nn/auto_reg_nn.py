@@ -2,13 +2,16 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import warnings
+from typing import List, Optional, Sequence, Tuple, Union
 
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
 
-def sample_mask_indices(input_dim, hidden_dim, simple=True):
+def sample_mask_indices(
+    input_dim: int, hidden_dim: int, simple: bool = True
+) -> torch.Tensor:
     """
     Samples the indices assigned to hidden units during the construction of MADE masks
 
@@ -19,7 +22,7 @@ def sample_mask_indices(input_dim, hidden_dim, simple=True):
     :param simple: True to space fractional indices by rounding to nearest int, false round randomly
     :type simple: bool
     """
-    indices = torch.linspace(1, input_dim, steps=hidden_dim, device='cpu').to(torch.Tensor().device)
+    indices = torch.linspace(1, input_dim, steps=hidden_dim)
     if simple:
         # Simple procedure tries to space fractional indices evenly by rounding to nearest int
         return torch.round(indices)
@@ -30,7 +33,13 @@ def sample_mask_indices(input_dim, hidden_dim, simple=True):
         return ints
 
 
-def create_mask(input_dim, context_dim, hidden_dims, permutation, output_dim_multiplier):
+def create_mask(
+    input_dim: int,
+    context_dim: int,
+    hidden_dims: List[int],
+    permutation: torch.LongTensor,
+    output_dim_multiplier: int,
+) -> Tuple[List[torch.Tensor], torch.Tensor]:
     """
     Creates MADE masks for a conditional distribution
 
@@ -64,15 +73,29 @@ def create_mask(input_dim, context_dim, hidden_dims, permutation, output_dim_mul
     output_indices = (var_index + 1).repeat(output_dim_multiplier)
 
     # Create mask from input to output for the skips connections
-    mask_skip = (output_indices.unsqueeze(-1) > input_indices.unsqueeze(0)).type_as(var_index)
+    mask_skip = (output_indices.unsqueeze(-1) > input_indices.unsqueeze(0)).type_as(
+        var_index
+    )
 
     # Create mask from input to first hidden layer, and between subsequent hidden layers
-    masks = [(hidden_indices[0].unsqueeze(-1) >= input_indices.unsqueeze(0)).type_as(var_index)]
+    masks = [
+        (hidden_indices[0].unsqueeze(-1) >= input_indices.unsqueeze(0)).type_as(
+            var_index
+        )
+    ]
     for i in range(1, len(hidden_dims)):
-        masks.append((hidden_indices[i].unsqueeze(-1) >= hidden_indices[i - 1].unsqueeze(0)).type_as(var_index))
+        masks.append(
+            (
+                hidden_indices[i].unsqueeze(-1) >= hidden_indices[i - 1].unsqueeze(0)
+            ).type_as(var_index)
+        )
 
     # Create mask from last hidden layer to output layer
-    masks.append((output_indices.unsqueeze(-1) > hidden_indices[-1].unsqueeze(0)).type_as(var_index))
+    masks.append(
+        (output_indices.unsqueeze(-1) > hidden_indices[-1].unsqueeze(0)).type_as(
+            var_index
+        )
+    )
 
     return masks, mask_skip
 
@@ -91,14 +114,14 @@ class MaskedLinear(nn.Linear):
     :type bias: bool
     """
 
-    def __init__(self, in_features, out_features, mask, bias=True):
+    def __init__(
+        self, in_features: int, out_features: int, mask: torch.Tensor, bias: bool = True
+    ) -> None:
         super().__init__(in_features, out_features, bias)
-        self.register_buffer('mask', mask.data)
+        self.mask: torch.Tensor
+        self.register_buffer("mask", mask.data)
 
-    def forward(self, _input):
-        """
-        the forward method that does the masked linear computation and returns the result
-        """
+    def forward(self, _input: torch.Tensor) -> torch.Tensor:
         masked_weight = self.weight * self.mask
         return F.linear(_input, masked_weight, self.bias)
 
@@ -150,17 +173,20 @@ class ConditionalAutoRegressiveNN(nn.Module):
     """
 
     def __init__(
-            self,
-            input_dim,
-            context_dim,
-            hidden_dims,
-            param_dims=[1, 1],
-            permutation=None,
-            skip_connections=False,
-            nonlinearity=nn.ReLU()):
+        self,
+        input_dim: int,
+        context_dim: int,
+        hidden_dims: List[int],
+        param_dims: List[int] = [1, 1],
+        permutation: Optional[torch.LongTensor] = None,
+        skip_connections: bool = False,
+        nonlinearity: torch.nn.Module = nn.ReLU(),
+    ) -> None:
         super().__init__()
         if input_dim == 1:
-            warnings.warn('ConditionalAutoRegressiveNN input_dim = 1. Consider using an affine transformation instead.')
+            warnings.warn(
+                "ConditionalAutoRegressiveNN input_dim = 1. Consider using an affine transformation instead."
+            )
         self.input_dim = input_dim
         self.context_dim = context_dim
         self.hidden_dims = hidden_dims
@@ -178,61 +204,70 @@ class ConditionalAutoRegressiveNN(nn.Module):
         # possible to connect to the outputs correctly
         for h in hidden_dims:
             if h < input_dim:
-                raise ValueError('Hidden dimension must not be less than input dimension.')
+                raise ValueError(
+                    "Hidden dimension must not be less than input dimension."
+                )
 
         if permutation is None:
             # By default set a random permutation of variables, which is important for performance with multiple steps
-            P = torch.randperm(input_dim, device='cpu').to(torch.Tensor().device)
+            P = torch.randperm(input_dim)
         else:
             # The permutation is chosen by the user
             P = permutation.type(dtype=torch.int64)
-        self.register_buffer('permutation', P)
+        self.permutation: torch.LongTensor
+        self.register_buffer("permutation", P)
 
         # Create masks
         self.masks, self.mask_skip = create_mask(
-            input_dim=input_dim, context_dim=context_dim, hidden_dims=hidden_dims, permutation=self.permutation,
-            output_dim_multiplier=self.output_multiplier)
+            input_dim=input_dim,
+            context_dim=context_dim,
+            hidden_dims=hidden_dims,
+            permutation=self.permutation,
+            output_dim_multiplier=self.output_multiplier,
+        )
 
         # Create masked layers
         layers = [MaskedLinear(input_dim + context_dim, hidden_dims[0], self.masks[0])]
         for i in range(1, len(hidden_dims)):
-            layers.append(MaskedLinear(hidden_dims[i - 1], hidden_dims[i], self.masks[i]))
-        layers.append(MaskedLinear(hidden_dims[-1], input_dim * self.output_multiplier, self.masks[-1]))
+            layers.append(
+                MaskedLinear(hidden_dims[i - 1], hidden_dims[i], self.masks[i])
+            )
+        layers.append(
+            MaskedLinear(
+                hidden_dims[-1], input_dim * self.output_multiplier, self.masks[-1]
+            )
+        )
         self.layers = nn.ModuleList(layers)
 
+        self.skip_layer: Optional[MaskedLinear]
         if skip_connections:
             self.skip_layer = MaskedLinear(
-                input_dim +
-                context_dim,
-                input_dim *
-                self.output_multiplier,
+                input_dim + context_dim,
+                input_dim * self.output_multiplier,
                 self.mask_skip,
-                bias=False)
+                bias=False,
+            )
         else:
             self.skip_layer = None
 
         # Save the nonlinearity
         self.f = nonlinearity
 
-    def get_permutation(self):
+    def get_permutation(self) -> torch.LongTensor:
         """
         Get the permutation applied to the inputs (by default this is chosen at random)
         """
         return self.permutation
 
-    def forward(self, x, context=None):
-        """
-        The forward method
-        """
+    def forward(
+        self, x: torch.Tensor, context: torch.Tensor
+    ) -> Union[Sequence[torch.Tensor], torch.Tensor]:
         # We must be able to broadcast the size of the context over the input
-        if context is None:
-            context = self.context
-
         context = context.expand(x.size()[:-1] + (context.size(-1),))
         x = torch.cat([context, x], dim=-1)
         return self._forward(x)
 
-    def _forward(self, x):
+    def _forward(self, x: torch.Tensor) -> Union[Sequence[torch.Tensor], torch.Tensor]:
         h = x
         for layer in self.layers[:-1]:
             h = self.f(layer(h))
@@ -243,13 +278,15 @@ class ConditionalAutoRegressiveNN(nn.Module):
 
         # Shape the output, squeezing the parameter dimension if all ones
         if self.output_multiplier == 1:
-            return h
+            return h  # type: ignore[no-any-return]
         else:
-            h = h.reshape(list(x.size()[:-1]) + [self.output_multiplier, self.input_dim])
+            h = h.reshape(
+                list(x.size()[:-1]) + [self.output_multiplier, self.input_dim]
+            )
 
             # Squeeze dimension if all parameters are one dimensional
             if self.count_params == 1:
-                return h
+                return h  # type: ignore[no-any-return]
 
             elif self.all_ones:
                 return torch.unbind(h, dim=-2)
@@ -299,26 +336,23 @@ class AutoRegressiveNN(ConditionalAutoRegressiveNN):
     """
 
     def __init__(
-            self,
-            input_dim,
-            hidden_dims,
-            param_dims=[1, 1],
-            permutation=None,
-            skip_connections=False,
-            nonlinearity=nn.ReLU()):
-        super(
-            AutoRegressiveNN,
-            self).__init__(
+        self,
+        input_dim: int,
+        hidden_dims: List[int],
+        param_dims: List[int] = [1, 1],
+        permutation: Optional[torch.LongTensor] = None,
+        skip_connections: bool = False,
+        nonlinearity: torch.nn.Module = nn.ReLU(),
+    ) -> None:
+        super(AutoRegressiveNN, self).__init__(
             input_dim,
             0,
             hidden_dims,
             param_dims=param_dims,
             permutation=permutation,
             skip_connections=skip_connections,
-            nonlinearity=nonlinearity)
+            nonlinearity=nonlinearity,
+        )
 
-    def forward(self, x):
-        """
-        The forward method
-        """
+    def forward(self, x: torch.Tensor) -> Union[Sequence[torch.Tensor], torch.Tensor]:  # type: ignore[override]
         return self._forward(x)

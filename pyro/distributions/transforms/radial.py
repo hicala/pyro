@@ -9,10 +9,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Transform, constraints
 
-from pyro.distributions.conditional import ConditionalTransformModule
-from pyro.distributions.torch_transform import TransformModule
-from pyro.distributions.util import copy_docs_from
 from pyro.nn import DenseNN
+
+from ..conditional import ConditionalTransformModule
+from ..torch_transform import TransformModule
+from ..util import copy_docs_from
 
 
 @copy_docs_from(Transform)
@@ -20,7 +21,6 @@ class ConditionedRadial(Transform):
     domain = constraints.real_vector
     codomain = constraints.real_vector
     bijective = True
-    event_dim = 1
 
     def __init__(self, params):
         super().__init__(cache_size=1)
@@ -42,7 +42,9 @@ class ConditionedRadial(Transform):
         :class:`~pyro.distributions.TransformedDistribution` `x` is a sample from the base distribution (or the output
         of a previous transform)
         """
-        x0, alpha_prime, beta_prime = self._params() if callable(self._params) else self._params
+        x0, alpha_prime, beta_prime = (
+            self._params() if callable(self._params) else self._params
+        )
 
         # Ensure invertibility using approach in appendix A.2
         alpha = F.softplus(alpha_prime)
@@ -52,11 +54,13 @@ class ConditionedRadial(Transform):
         diff = x - x0
         r = diff.norm(dim=-1, keepdim=True)
         h = (alpha + r).reciprocal()
-        h_prime = - (h ** 2)
+        h_prime = -(h**2)
         beta_h = beta * h
 
-        self._cached_logDetJ = ((x0.size(-1) - 1) * torch.log1p(beta_h) +
-                                torch.log1p(beta_h + beta * h_prime * r)).sum(-1)
+        self._cached_logDetJ = (
+            (x0.size(-1) - 1) * torch.log1p(beta_h)
+            + torch.log1p(beta_h + beta * h_prime * r)
+        ).sum(-1)
         return x + beta_h * diff
 
     def _inverse(self, y):
@@ -69,7 +73,9 @@ class ConditionedRadial(Transform):
         cached on the forward call)
         """
 
-        raise KeyError("ConditionedRadial object expected to find key in intermediates cache but didn't")
+        raise KeyError(
+            "ConditionedRadial object expected to find key in intermediates cache but didn't"
+        )
 
     def log_abs_det_jacobian(self, x, y):
         """
@@ -124,14 +130,25 @@ class Radial(ConditionedRadial, TransformModule):
     domain = constraints.real_vector
     codomain = constraints.real_vector
     bijective = True
-    event_dim = 1
 
     def __init__(self, input_dim):
         super().__init__(self._params)
 
-        self.x0 = nn.Parameter(torch.Tensor(input_dim,))
-        self.alpha_prime = nn.Parameter(torch.Tensor(1,))
-        self.beta_prime = nn.Parameter(torch.Tensor(1,))
+        self.x0 = nn.Parameter(
+            torch.empty(
+                input_dim,
+            )
+        )
+        self.alpha_prime = nn.Parameter(
+            torch.empty(
+                1,
+            )
+        )
+        self.beta_prime = nn.Parameter(
+            torch.empty(
+                1,
+            )
+        )
         self.input_dim = input_dim
         self.reset_parameters()
 
@@ -139,7 +156,7 @@ class Radial(ConditionedRadial, TransformModule):
         return self.x0, self.alpha_prime, self.beta_prime
 
     def reset_parameters(self):
-        stdv = 1. / math.sqrt(self.x0.size(0))
+        stdv = 1.0 / math.sqrt(self.x0.size(0))
         self.alpha_prime.data.uniform_(-stdv, stdv)
         self.beta_prime.data.uniform_(-stdv, stdv)
         self.x0.data.uniform_(-stdv, stdv)
@@ -194,7 +211,6 @@ class ConditionalRadial(ConditionalTransformModule):
     domain = constraints.real_vector
     codomain = constraints.real_vector
     bijective = True
-    event_dim = 1
 
     def __init__(self, nn):
         super().__init__()

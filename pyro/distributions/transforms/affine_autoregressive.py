@@ -5,13 +5,14 @@ from functools import partial
 
 import torch
 import torch.nn as nn
-from torch.distributions import constraints
 
-from pyro.distributions.conditional import ConditionalTransformModule
-from pyro.distributions.torch_transform import TransformModule
-from pyro.distributions.transforms.utils import clamp_preserve_gradients
-from pyro.distributions.util import copy_docs_from
 from pyro.nn import AutoRegressiveNN, ConditionalAutoRegressiveNN
+
+from .. import constraints
+from ..conditional import ConditionalTransformModule
+from ..torch_transform import TransformModule
+from ..util import copy_docs_from
+from .utils import clamp_preserve_gradients
 
 
 @copy_docs_from(TransformModule)
@@ -93,17 +94,16 @@ class AffineAutoregressive(TransformModule):
     domain = constraints.real_vector
     codomain = constraints.real_vector
     bijective = True
-    event_dim = 1
     sign = +1
     autoregressive = True
 
     def __init__(
-            self,
-            autoregressive_nn,
-            log_scale_min_clip=-5.,
-            log_scale_max_clip=3.,
-            sigmoid_bias=2.0,
-            stable=False
+        self,
+        autoregressive_nn,
+        log_scale_min_clip=-5.0,
+        log_scale_max_clip=3.0,
+        sigmoid_bias=2.0,
+        stable=False,
     ):
         super().__init__(cache_size=1)
         self.arn = autoregressive_nn
@@ -129,7 +129,9 @@ class AffineAutoregressive(TransformModule):
         the base distribution (or the output of a previous transform)
         """
         mean, log_scale = self.arn(x)
-        log_scale = clamp_preserve_gradients(log_scale, self.log_scale_min_clip, self.log_scale_max_clip)
+        log_scale = clamp_preserve_gradients(
+            log_scale, self.log_scale_min_clip, self.log_scale_max_clip
+        )
         self._cached_log_scale = log_scale
         scale = torch.exp(log_scale)
 
@@ -152,13 +154,20 @@ class AffineAutoregressive(TransformModule):
         # NOTE: Inversion is an expensive operation that scales in the dimension of the input
         for idx in perm:
             mean, log_scale = self.arn(torch.stack(x, dim=-1))
-            inverse_scale = torch.exp(-clamp_preserve_gradients(
-                log_scale[..., idx], min=self.log_scale_min_clip, max=self.log_scale_max_clip))
+            inverse_scale = torch.exp(
+                -clamp_preserve_gradients(
+                    log_scale[..., idx],
+                    min=self.log_scale_min_clip,
+                    max=self.log_scale_max_clip,
+                )
+            )
             mean = mean[..., idx]
             x[idx] = (y[..., idx] - mean) * inverse_scale
 
         x = torch.stack(x, dim=-1)
-        log_scale = clamp_preserve_gradients(log_scale, min=self.log_scale_min_clip, max=self.log_scale_max_clip)
+        log_scale = clamp_preserve_gradients(
+            log_scale, min=self.log_scale_min_clip, max=self.log_scale_max_clip
+        )
         self._cached_log_scale = log_scale
         return x
 
@@ -176,7 +185,9 @@ class AffineAutoregressive(TransformModule):
             log_scale = self._cached_log_scale
         elif not self.stable:
             _, log_scale = self.arn(x)
-            log_scale = clamp_preserve_gradients(log_scale, self.log_scale_min_clip, self.log_scale_max_clip)
+            log_scale = clamp_preserve_gradients(
+                log_scale, self.log_scale_min_clip, self.log_scale_max_clip
+            )
         else:
             _, logit_scale = self.arn(x)
             log_scale = self.logsigmoid(logit_scale + self.sigmoid_bias)
@@ -311,7 +322,6 @@ class ConditionalAffineAutoregressive(ConditionalTransformModule):
     domain = constraints.real_vector
     codomain = constraints.real_vector
     bijective = True
-    event_dim = 1
 
     def __init__(self, autoregressive_nn, **kwargs):
         super().__init__()
@@ -363,7 +373,9 @@ def affine_autoregressive(input_dim, hidden_dims=None, **kwargs):
     return AffineAutoregressive(arn, **kwargs)
 
 
-def conditional_affine_autoregressive(input_dim, context_dim, hidden_dims=None, **kwargs):
+def conditional_affine_autoregressive(
+    input_dim, context_dim, hidden_dims=None, **kwargs
+):
     """
     A helper function to create an
     :class:`~pyro.distributions.transforms.ConditionalAffineAutoregressive` object

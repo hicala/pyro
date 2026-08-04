@@ -4,13 +4,14 @@
 from functools import partial
 
 import torch
-from torch.distributions import constraints
 
-from pyro.distributions.conditional import ConditionalTransformModule
-from pyro.distributions.torch_transform import TransformModule
-from pyro.distributions.transforms.spline import ConditionalSpline
-from pyro.distributions.util import copy_docs_from
 from pyro.nn import AutoRegressiveNN, ConditionalAutoRegressiveNN
+
+from .. import constraints
+from ..conditional import ConditionalTransformModule
+from ..torch_transform import TransformModule
+from ..util import copy_docs_from
+from .spline import ConditionalSpline
 
 
 @copy_docs_from(TransformModule)
@@ -72,20 +73,16 @@ class SplineAutoregressive(TransformModule):
     domain = constraints.real_vector
     codomain = constraints.real_vector
     bijective = True
-    event_dim = 1
     autoregressive = True
 
     def __init__(
-            self,
-            input_dim,
-            autoregressive_nn,
-            count_bins=8,
-            bound=3.,
-            order='linear'
+        self, input_dim, autoregressive_nn, count_bins=8, bound=3.0, order="linear"
     ):
         super(SplineAutoregressive, self).__init__(cache_size=1)
         self.arn = autoregressive_nn
-        self.spline = ConditionalSpline(autoregressive_nn, input_dim, count_bins, bound, order)
+        self.spline = ConditionalSpline(
+            autoregressive_nn, input_dim, count_bins, bound, order
+        )
 
     def _call(self, x):
         """
@@ -200,7 +197,6 @@ class ConditionalSplineAutoregressive(ConditionalTransformModule):
     domain = constraints.real_vector
     codomain = constraints.real_vector
     bijective = True
-    event_dim = 1
 
     def __init__(self, input_dim, autoregressive_nn, **kwargs):
         super().__init__()
@@ -221,7 +217,9 @@ class ConditionalSplineAutoregressive(ConditionalTransformModule):
         return SplineAutoregressive(self.input_dim, cond_nn, **self.kwargs)
 
 
-def spline_autoregressive(input_dim, hidden_dims=None, count_bins=8, bound=3.0, order='linear'):
+def spline_autoregressive(
+    input_dim, hidden_dims=None, count_bins=8, bound=3.0, order="linear"
+):
     r"""
     A helper function to create an
     :class:`~pyro.distributions.transforms.SplineAutoregressive` object that takes
@@ -248,11 +246,14 @@ def spline_autoregressive(input_dim, hidden_dims=None, count_bins=8, bound=3.0, 
 
     param_dims = [count_bins, count_bins, count_bins - 1, count_bins]
     arn = AutoRegressiveNN(input_dim, hidden_dims, param_dims=param_dims)
-    return SplineAutoregressive(input_dim, arn, count_bins=count_bins, bound=bound, order=order)
+    return SplineAutoregressive(
+        input_dim, arn, count_bins=count_bins, bound=bound, order=order
+    )
 
 
-def conditional_spline_autoregressive(input_dim, context_dim, hidden_dims=None, count_bins=8, bound=3.0,
-                                      order='linear'):
+def conditional_spline_autoregressive(
+    input_dim, context_dim, hidden_dims=None, count_bins=8, bound=3.0, order="linear"
+):
     r"""
     A helper function to create a
     :class:`~pyro.distributions.transforms.ConditionalSplineAutoregressive` object
@@ -280,5 +281,9 @@ def conditional_spline_autoregressive(input_dim, context_dim, hidden_dims=None, 
         hidden_dims = [input_dim * 10, input_dim * 10]
 
     param_dims = [count_bins, count_bins, count_bins - 1, count_bins]
-    arn = ConditionalAutoRegressiveNN(input_dim, context_dim, hidden_dims, param_dims=param_dims)
-    return ConditionalSplineAutoregressive(input_dim, arn, count_bins=count_bins, bound=bound, order=order)
+    arn = ConditionalAutoRegressiveNN(
+        input_dim, context_dim, hidden_dims, param_dims=param_dims
+    )
+    return ConditionalSplineAutoregressive(
+        input_dim, arn, count_bins=count_bins, bound=bound, order=order
+    )

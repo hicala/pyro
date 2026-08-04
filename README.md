@@ -1,11 +1,17 @@
+<!--
+Copyright Contributors to the Pyro project.
+
+SPDX-License-Identifier: Apache-2.0
+-->
+
 <div align="center">
   <a href="http://pyro.ai"> <img width="220px" height="220px" src="docs/source/_static/img/pyro_logo_with_text.png"></a>
 </div>
 
 -----------------------------------------
 
-[![Build Status](https://travis-ci.com/pyro-ppl/pyro.svg?branch=dev)](https://travis-ci.com/pyro-ppl/pyro)
-[![codecov.io](https://codecov.io/github/pyro-ppl/pyro/branch/dev/graph/badge.svg)](https://codecov.io/github/pyro-ppl/pyro)
+[![Build Status](https://github.com/pyro-ppl/pyro/workflows/CI/badge.svg)](https://github.com/pyro-ppl/pyro/actions)
+[![Coverage Status](https://coveralls.io/repos/github/pyro-ppl/pyro/badge.svg?branch=dev)](https://coveralls.io/github/pyro-ppl/pyro?branch=dev)
 [![Latest Version](https://badge.fury.io/py/pyro-ppl.svg)](https://pypi.python.org/pypi/pyro-ppl)
 [![Documentation Status](https://readthedocs.org/projects/pyro-ppl/badge/?version=dev)](http://pyro-ppl.readthedocs.io/en/stable/?badge=dev)
 [![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/3056/badge)](https://bestpractices.coreinfrastructure.org/projects/3056)
@@ -34,9 +40,6 @@ For additional blog posts, check out work on [experimental design](https://eng.u
 ### Installing a stable Pyro release
 
 **Install using pip:**
-
-Pyro supports Python 3.6+.
-
 ```sh
 pip install pyro-ppl
 ```
@@ -61,18 +64,17 @@ Make sure that the models come from the same release version of the [Pyro source
 
 For recent features you can install Pyro from source.
 
-**Install using pip:**
+**Install Pyro using pip:**
 
 ```sh
 pip install git+https://github.com/pyro-ppl/pyro.git
 ```
-
 or, with the `extras` dependency to run the probabilistic models included in the `examples`/`tutorials` directories:
 ```sh
 pip install git+https://github.com/pyro-ppl/pyro.git#egg=project[extras]
 ```
 
-**Install from source:**
+**Install Pyro from source:**
 
 ```sh
 git clone https://github.com/pyro-ppl/pyro

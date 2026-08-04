@@ -9,10 +9,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Transform, constraints
 
-from pyro.distributions.conditional import ConditionalTransformModule
-from pyro.distributions.torch_transform import TransformModule
-from pyro.distributions.util import copy_docs_from
 from pyro.nn import DenseNN
+
+from ..conditional import ConditionalTransformModule
+from ..torch_transform import TransformModule
+from ..util import copy_docs_from
 
 
 @copy_docs_from(Transform)
@@ -20,7 +21,6 @@ class ConditionedPlanar(Transform):
     domain = constraints.real_vector
     codomain = constraints.real_vector
     bijective = True
-    event_dim = 1
 
     def __init__(self, params):
         super().__init__(cache_size=1)
@@ -46,13 +46,21 @@ class ConditionedPlanar(Transform):
         # x ~ (batch_size, dim_size, 1)
         # w ~ (batch_size, 1, dim_size)
         # bias ~ (batch_size, 1)
-        act = torch.tanh(torch.matmul(w.unsqueeze(-2), x.unsqueeze(-1)).squeeze(-1) + bias)
+        act = torch.tanh(
+            torch.matmul(w.unsqueeze(-2), x.unsqueeze(-1)).squeeze(-1) + bias
+        )
         u_hat = self.u_hat(u, w)
         y = x + u_hat * act
 
-        psi_z = (1. - act.pow(2)) * w
+        psi_z = (1.0 - act.pow(2)) * w
         self._cached_logDetJ = torch.log(
-            torch.abs(1 + torch.matmul(psi_z.unsqueeze(-2), u_hat.unsqueeze(-1)).squeeze(-1).squeeze(-1)))
+            torch.abs(
+                1
+                + torch.matmul(psi_z.unsqueeze(-2), u_hat.unsqueeze(-1))
+                .squeeze(-1)
+                .squeeze(-1)
+            )
+        )
 
         return y
 
@@ -66,7 +74,9 @@ class ConditionedPlanar(Transform):
         cached on the forward call)
         """
 
-        raise KeyError("ConditionedPlanar object expected to find key in intermediates cache but didn't")
+        raise KeyError(
+            "ConditionedPlanar object expected to find key in intermediates cache but didn't"
+        )
 
     def log_abs_det_jacobian(self, x, y):
         """
@@ -123,14 +133,25 @@ class Planar(ConditionedPlanar, TransformModule):
     domain = constraints.real_vector
     codomain = constraints.real_vector
     bijective = True
-    event_dim = 1
 
     def __init__(self, input_dim):
         super().__init__(self._params)
 
-        self.bias = nn.Parameter(torch.Tensor(1,))
-        self.u = nn.Parameter(torch.Tensor(input_dim,))
-        self.w = nn.Parameter(torch.Tensor(input_dim,))
+        self.bias = nn.Parameter(
+            torch.empty(
+                1,
+            )
+        )
+        self.u = nn.Parameter(
+            torch.empty(
+                input_dim,
+            )
+        )
+        self.w = nn.Parameter(
+            torch.empty(
+                input_dim,
+            )
+        )
 
         self.input_dim = input_dim
         self.reset_parameters()
@@ -139,7 +160,7 @@ class Planar(ConditionedPlanar, TransformModule):
         return self.bias, self.u, self.w
 
     def reset_parameters(self):
-        stdv = 1. / math.sqrt(self.u.size(0))
+        stdv = 1.0 / math.sqrt(self.u.size(0))
         self.w.data.uniform_(-stdv, stdv)
         self.u.data.uniform_(-stdv, stdv)
         self.bias.data.zero_()
@@ -196,7 +217,6 @@ class ConditionalPlanar(ConditionalTransformModule):
     domain = constraints.real_vector
     codomain = constraints.real_vector
     bijective = True
-    event_dim = 1
 
     def __init__(self, nn):
         super().__init__()

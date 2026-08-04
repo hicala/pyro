@@ -4,25 +4,31 @@
 import numbers
 
 import torch
-from torch.distributions import constraints
 from torch.distributions.utils import broadcast_all
 
-from pyro.distributions.torch import Beta, Binomial, Dirichlet, Gamma, Multinomial, Poisson
-from pyro.distributions.torch_distribution import TorchDistribution
 from pyro.ops.special import log_beta, log_binomial
+
+from . import constraints
+from .torch import Beta, Binomial, Dirichlet, Gamma, Multinomial, Poisson
+from .torch_distribution import TorchDistribution
+from .util import broadcast_shape
 
 
 def _log_beta_1(alpha, value, is_sparse):
     if is_sparse:
-        mask = (value != 0)
+        mask = value != 0
         value, alpha, mask = torch.broadcast_tensors(value, alpha, mask)
         result = torch.zeros_like(value)
         value = value[mask]
         alpha = alpha[mask]
-        result[mask] = torch.lgamma(1 + value) + torch.lgamma(alpha) - torch.lgamma(value + alpha)
+        result[mask] = (
+            torch.lgamma(1 + value) + torch.lgamma(alpha) - torch.lgamma(value + alpha)
+        )
         return result
     else:
-        return torch.lgamma(1 + value) + torch.lgamma(alpha) - torch.lgamma(value + alpha)
+        return (
+            torch.lgamma(1 + value) + torch.lgamma(alpha) - torch.lgamma(value + alpha)
+        )
 
 
 class BetaBinomial(TorchDistribution):
@@ -41,8 +47,12 @@ class BetaBinomial(TorchDistribution):
     :param total_count: Number of Bernoulli trials.
     :type total_count: float or torch.Tensor
     """
-    arg_constraints = {'concentration1': constraints.positive, 'concentration0': constraints.positive,
-                       'total_count': constraints.nonnegative_integer}
+
+    arg_constraints = {
+        "concentration1": constraints.positive,
+        "concentration0": constraints.positive,
+        "total_count": constraints.nonnegative_integer,
+    }
     has_enumerate_support = True
     support = Binomial.support
 
@@ -50,11 +60,14 @@ class BetaBinomial(TorchDistribution):
     # a shifted Sterling's approximation to the Beta function, reducing
     # computational cost from 9 lgamma() evaluations to 12 log() evaluations
     # plus arithmetic. Recommended values are between 0.1 and 0.01.
-    approx_log_prob_tol = 0.
+    approx_log_prob_tol = 0.0
 
-    def __init__(self, concentration1, concentration0, total_count=1, validate_args=None):
+    def __init__(
+        self, concentration1, concentration0, total_count=1, validate_args=None
+    ):
         concentration1, concentration0, total_count = broadcast_all(
-            concentration1, concentration0, total_count)
+            concentration1, concentration0, total_count
+        )
         self._beta = Beta(concentration1, concentration0)
         self.total_count = total_count
         super().__init__(self._beta._batch_shape, validate_args=validate_args)
@@ -89,7 +102,11 @@ class BetaBinomial(TorchDistribution):
         a = self.concentration1
         b = self.concentration0
         tol = self.approx_log_prob_tol
-        return log_binomial(n, k, tol) + log_beta(k + a, n - k + b, tol) - log_beta(a, b, tol)
+        return (
+            log_binomial(n, k, tol)
+            + log_beta(k + a, n - k + b, tol)
+            - log_beta(a, b, tol)
+        )
 
     @property
     def mean(self):
@@ -97,13 +114,23 @@ class BetaBinomial(TorchDistribution):
 
     @property
     def variance(self):
-        return self._beta.variance * self.total_count * (self.concentration0 + self.concentration1 + self.total_count)
+        return (
+            self._beta.variance
+            * self.total_count
+            * (self.concentration0 + self.concentration1 + self.total_count)
+        )
 
     def enumerate_support(self, expand=True):
         total_count = int(self.total_count.max())
         if not self.total_count.min() == total_count:
-            raise NotImplementedError("Inhomogeneous total count not supported by `enumerate_support`.")
-        values = torch.arange(1 + total_count, dtype=self.concentration1.dtype, device=self.concentration1.device)
+            raise NotImplementedError(
+                "Inhomogeneous total count not supported by `enumerate_support`."
+            )
+        values = torch.arange(
+            1 + total_count,
+            dtype=self.concentration1.dtype,
+            device=self.concentration1.device,
+        )
         values = values.view((-1,) + (1,) * len(self._batch_shape))
         if expand:
             values = values.expand((-1,) + self._batch_shape)
@@ -124,24 +151,38 @@ class DirichletMultinomial(TorchDistribution):
     :param bool is_sparse: Whether to assume value is mostly zero when computing
         :meth:`log_prob`, which can speed up computation when data is sparse.
     """
-    arg_constraints = {'concentration': constraints.positive, 'total_count': constraints.nonnegative_integer}
+
+    arg_constraints = {
+        "concentration": constraints.independent(constraints.positive, 1),
+        "total_count": constraints.nonnegative_integer,
+    }
     support = Multinomial.support
 
-    def __init__(self, concentration, total_count=1, is_sparse=False, validate_args=None):
+    def __init__(
+        self, concentration, total_count=1, is_sparse=False, validate_args=None
+    ):
+        batch_shape = concentration.shape[:-1]
+        event_shape = concentration.shape[-1:]
         if isinstance(total_count, numbers.Number):
-            total_count = torch.tensor(total_count, dtype=concentration.dtype, device=concentration.device)
-        total_count_1 = total_count.unsqueeze(-1)
-        concentration, total_count = torch.broadcast_tensors(concentration, total_count_1)
-        total_count = total_count_1.squeeze(-1)
+            total_count = concentration.new_tensor(total_count)
+        else:
+            batch_shape = broadcast_shape(batch_shape, total_count.shape)
+            concentration = concentration.expand(batch_shape + (-1,))
+            total_count = total_count.expand(batch_shape)
         self._dirichlet = Dirichlet(concentration)
         self.total_count = total_count
         self.is_sparse = is_sparse
-        super().__init__(
-            self._dirichlet._batch_shape, self._dirichlet.event_shape, validate_args=validate_args)
+        super().__init__(batch_shape, event_shape, validate_args=validate_args)
 
     @property
     def concentration(self):
         return self._dirichlet.concentration
+
+    @staticmethod
+    def infer_shapes(concentration, total_count=()):
+        batch_shape = broadcast_shape(concentration[:-1], total_count)
+        event_shape = concentration[-1:]
+        return batch_shape, event_shape
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(DirichletMultinomial, _instance)
@@ -150,7 +191,8 @@ class DirichletMultinomial(TorchDistribution):
         new.total_count = self.total_count.expand(batch_shape)
         new.is_sparse = self.is_sparse
         super(DirichletMultinomial, new).__init__(
-            new._dirichlet.batch_shape, new._dirichlet.event_shape, validate_args=False)
+            new._dirichlet.batch_shape, new._dirichlet.event_shape, validate_args=False
+        )
         new._validate_args = self._validate_args
         return new
 
@@ -158,15 +200,18 @@ class DirichletMultinomial(TorchDistribution):
         probs = self._dirichlet.sample(sample_shape)
         total_count = int(self.total_count.max())
         if not self.total_count.min() == total_count:
-            raise NotImplementedError("Inhomogeneous total count not supported by `sample`.")
+            raise NotImplementedError(
+                "Inhomogeneous total count not supported by `sample`."
+            )
         return Multinomial(total_count, probs).sample()
 
     def log_prob(self, value):
         if self._validate_args:
             self._validate_sample(value)
         alpha = self.concentration
-        return (_log_beta_1(alpha.sum(-1), value.sum(-1), self.is_sparse) -
-                _log_beta_1(alpha, value, self.is_sparse).sum(-1))
+        return _log_beta_1(alpha.sum(-1), value.sum(-1), self.is_sparse) - _log_beta_1(
+            alpha, value, self.is_sparse
+        ).sum(-1)
 
     @property
     def mean(self):
@@ -198,12 +243,16 @@ class GammaPoisson(TorchDistribution):
         distribution.
     """
 
-    arg_constraints = {'concentration': constraints.positive, 'rate': constraints.positive}
+    arg_constraints = {
+        "concentration": constraints.positive,
+        "rate": constraints.positive,
+    }
     support = Poisson.support
 
     def __init__(self, concentration, rate, validate_args=None):
         concentration, rate = broadcast_all(concentration, rate)
-        self._gamma = Gamma(concentration, rate)
+        self._gamma = Gamma(concentration, rate, validate_args=False)
+        self._gamma._validate_args = validate_args
         super().__init__(self._gamma._batch_shape, validate_args=validate_args)
 
     @property
@@ -230,8 +279,12 @@ class GammaPoisson(TorchDistribution):
         if self._validate_args:
             self._validate_sample(value)
         post_value = self.concentration + value
-        return -log_beta(self.concentration, value + 1) - post_value.log() + \
-            self.concentration * self.rate.log() - post_value * (1 + self.rate).log()
+        return (
+            -log_beta(self.concentration, value + 1)
+            - post_value.log()
+            + self.concentration * self.rate.log()
+            - post_value * (1 + self.rate).log()
+        )
 
     @property
     def mean(self):

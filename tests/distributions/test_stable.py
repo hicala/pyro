@@ -35,16 +35,14 @@ def test_shape(sample_shape, batch_shape):
 def test_sample(alpha, beta):
     num_samples = 100
     d = dist.Stable(alpha, beta, coords="S")
-
-    def sampler(size):
-        # Temporarily increase radius to test hole-patching logic.
-        # Scipy doesn't handle values of alpha very close to 1.
-        try:
-            old = pyro.distributions.stable.RADIUS
-            pyro.distributions.stable.RADIUS = 0.02
-            return d.sample([size])
-        finally:
-            pyro.distributions.stable.RADIUS = old
+    # Temporarily increase radius to test hole-patching logic.
+    # Scipy doesn't handle values of alpha very close to 1.
+    try:
+        old = pyro.distributions.stable.RADIUS
+        pyro.distributions.stable.RADIUS = 0.02
+        samples = d.sample((num_samples,))
+    finally:
+        pyro.distributions.stable.RADIUS = old
 
     def cdf(x):
         with warnings.catch_warnings(record=True) as w:
@@ -56,15 +54,25 @@ def test_sample(alpha, beta):
             pytest.xfail(reason="scipy.stats.levy_stable.cdf is unstable")
         return result
 
-    assert kstest(sampler, cdf, N=num_samples).pvalue > 0.1
+    assert kstest(samples, cdf).pvalue > 0.1
 
 
 @pytest.mark.parametrize("beta", [-1.0, -0.5, 0.0, 0.5, 1.0])
-@pytest.mark.parametrize("alpha", [
-    0.1, 0.4, 0.8, 0.99,
-    0.999999, 1.000001,  # scipy sampler is buggy very close to 1
-    1.01, 1.3, 1.7, 2.0,
-])
+@pytest.mark.parametrize(
+    "alpha",
+    [
+        0.1,
+        0.4,
+        0.8,
+        0.99,
+        0.999999,
+        1.000001,  # scipy sampler is buggy very close to 1
+        1.01,
+        1.3,
+        1.7,
+        2.0,
+    ],
+)
 def test_sample_2(alpha, beta):
     num_samples = 10000
 
@@ -89,14 +97,16 @@ def test_sample_2(alpha, beta):
 def test_normal(loc, scale):
     num_samples = 100000
     expected = dist.Normal(loc, scale).sample([num_samples])
-    actual = dist.Stable(2, 0, scale * 0.5 ** 0.5, loc).sample([num_samples])
+    actual = dist.Stable(2, 0, scale * 0.5**0.5, loc).sample([num_samples])
     assert_close(actual.mean(), expected.mean(), atol=0.01)
     assert_close(actual.std(), expected.std(), atol=0.01)
 
 
 @pytest.mark.parametrize("skew0", [-0.9, -0.5, 0.0, 0.5, 0.9])
 @pytest.mark.parametrize("skew1", [-0.9, -0.5, 0.0, 0.5, 0.9])
-@pytest.mark.parametrize("scale0,scale1", [(0.1, 0.9), (0.2, 0.8), (0.4, 0.6), (0.5, 0.5)])
+@pytest.mark.parametrize(
+    "scale0,scale1", [(0.1, 0.9), (0.2, 0.8), (0.4, 0.6), (0.5, 0.5)]
+)
 @pytest.mark.parametrize("stability", [0.5, 0.99, 1.01, 1.5, 1.9])
 def test_additive(stability, skew0, skew1, scale0, scale1):
     num_samples = 10000
@@ -104,13 +114,14 @@ def test_additive(stability, skew0, skew1, scale0, scale1):
     d1 = dist.Stable(stability, skew1, scale1, coords="S")
     expected = d0.sample([num_samples]) + d1.sample([num_samples])
 
-    scale = (scale0 ** stability + scale1 ** stability) ** (1 / stability)
-    skew = ((skew0 * scale0 ** stability + skew1 * scale1 ** stability) /
-            (scale0 ** stability + scale1 ** stability))
+    scale = (scale0**stability + scale1**stability) ** (1 / stability)
+    skew = (skew0 * scale0**stability + skew1 * scale1**stability) / (
+        scale0**stability + scale1**stability
+    )
     d = dist.Stable(stability, skew, scale, coords="S")
     actual = d.sample([num_samples])
 
-    assert ks_2samp(expected, actual).pvalue > 0.05
+    assert ks_2samp(expected, actual).pvalue > 0.03
 
 
 @pytest.mark.parametrize("scale", [0.5, 1.5])

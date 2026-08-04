@@ -6,6 +6,14 @@ MCMC
     :undoc-members:
     :show-inheritance:
 
+StreamingMCMC
+-------------
+
+.. autoclass:: pyro.infer.mcmc.api.StreamingMCMC
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 MCMCKernel
 ----------
 .. autoclass:: pyro.infer.mcmc.mcmc_kernel.MCMCKernel
@@ -29,6 +37,14 @@ NUTS
     :undoc-members:
     :show-inheritance:
 
+RandomWalkKernel
+----------------
+
+.. autoclass:: pyro.infer.mcmc.RandomWalkKernel
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 BlockMassMatrix
 ---------------
 
@@ -43,3 +59,5 @@ Utilities
 .. autofunction:: pyro.infer.mcmc.util.initialize_model
 
 .. autofunction:: pyro.infer.mcmc.util.diagnostics
+
+.. autofunction:: pyro.infer.mcmc.util.select_samples

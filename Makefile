@@ -3,7 +3,7 @@
 all: docs test
 
 install: FORCE
-	pip install -e .[dev,profile]
+	pip install -e .[dev,profile] --config-settings editable_mode=strict
 
 uninstall: FORCE
 	pip uninstall pyro-ppl
@@ -18,11 +18,17 @@ tutorial: FORCE
 	$(MAKE) -C tutorial html
 
 lint: FORCE
-	flake8
+	ruff check .
+	black --check *.py pyro examples tests scripts profiler
 	python scripts/update_headers.py --check
+	mypy --install-types --non-interactive --warn-unused-ignores pyro scripts tests
 
 license: FORCE
 	python scripts/update_headers.py
+
+format: license FORCE
+	ruff check --fix .
+	black *.py pyro examples tests scripts profiler
 
 version: FORCE
 	python scripts/update_version.py
@@ -32,10 +38,9 @@ scrub: FORCE
 	find tutorial -name "*.ipynb" | xargs python tutorial/source/cleannb.py
 
 doctest: FORCE
-	python -m pytest -p tests.doctest_fixtures --doctest-modules -o filterwarnings=ignore pyro
-
-format: FORCE
-	isort --recursive *.py pyro/ examples/ tests/ profiler/*.py docs/source/conf.py
+	# We skip testing pyro.distributions.torch wrapper classes because
+	# they include torch docstrings which are tested upstream.
+	python -m pytest -p tests.doctest_fixtures --doctest-modules -o filterwarnings=ignore pyro --ignore=pyro/distributions/torch.py
 
 perf-test: FORCE
 	bash scripts/perf_test.sh ${ref}
@@ -64,11 +69,11 @@ test-all: lint FORCE
 	  | xargs pytest -vx --nbval-lax
 
 test-cuda: lint FORCE
-	CUDA_TEST=1 PYRO_TENSOR_TYPE=torch.cuda.DoubleTensor pytest -vx --stage unit
+	CUDA_TEST=1 PYRO_DTYPE=float64 PYRO_DEVICE=cuda pytest -vx --stage unit
 	CUDA_TEST=1 pytest -vx tests/test_examples.py::test_cuda
 
 test-cuda-lax: lint FORCE
-	CUDA_TEST=1 PYRO_TENSOR_TYPE=torch.cuda.DoubleTensor pytest -vx --stage unit --lax
+	CUDA_TEST=1 PYRO_DTYPE=float64 PYRO_DEVICE=cuda pytest -vx --stage unit --lax
 	CUDA_TEST=1 pytest -vx tests/test_examples.py::test_cuda
 
 test-jit: FORCE
@@ -78,7 +83,7 @@ test-jit: FORCE
 		-k JIT=True | tee -a jit.log
 
 test-funsor: lint FORCE
-	pytest -vx -n auto --stage funsor
+	pytest -vx -n auto -p no:benchmark --stage funsor
 
 clean: FORCE
 	git clean -dfx -e pyro_ppl.egg-info

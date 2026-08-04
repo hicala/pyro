@@ -34,21 +34,38 @@ class LatentStableReparam(Reparam):
 
     [1] J.P. Nolan (2017).
         Stable Distributions: Models for Heavy Tailed Data.
-        http://fs2.american.edu/jpnolan/www/stable/chap1.pdf
+        https://edspace.american.edu/jpnolan/wp-content/uploads/sites/1720/2020/09/Chap1.pdf
     """
-    def __call__(self, name, fn, obs):
+
+    def apply(self, msg):
+        name = msg["name"]
+        fn = msg["fn"]
+        # ignore msg["value"]
+        is_observed = msg["is_observed"]
+
         fn, event_dim = self._unwrap(fn)
-        assert isinstance(fn, dist.Stable) and fn.coords == "S0"
-        assert obs is None, "LatentStableReparam does not support observe statements"
+        assert (
+            isinstance(fn, dist.Stable)
+            and fn.coords == "S0"
+            and not isinstance(fn, dist.StableWithLogProb)
+        )
+        if is_observed:
+            raise NotImplementedError(
+                f"At pyro.sample({repr(name)},...), "
+                "LatentStableReparam does not support observe statements"
+            )
 
         # Draw parameter-free noise.
         proto = fn.stability
         half_pi = proto.new_tensor(math.pi / 2)
         one = proto.new_ones(proto.shape)
-        u = pyro.sample("{}_uniform".format(name),
-                        self._wrap(dist.Uniform(-half_pi, half_pi).expand(proto.shape), event_dim))
-        e = pyro.sample("{}_exponential".format(name),
-                        self._wrap(dist.Exponential(one), event_dim))
+        u = pyro.sample(
+            "{}_uniform".format(name),
+            self._wrap(dist.Uniform(-half_pi, half_pi).expand(proto.shape), event_dim),
+        )
+        e = pyro.sample(
+            "{}_exponential".format(name), self._wrap(dist.Exponential(one), event_dim)
+        )
 
         # Differentiably transform.
         x = _standard_stable(fn.stability, fn.skew, u, e, coords="S0")
@@ -56,7 +73,7 @@ class LatentStableReparam(Reparam):
 
         # Simulate a pyro.deterministic() site.
         new_fn = dist.Delta(value, event_dim=event_dim).mask(False)
-        return new_fn, value
+        return {"fn": new_fn, "value": value, "is_observed": True}
 
 
 class SymmetricStableReparam(Reparam):
@@ -80,9 +97,19 @@ class SymmetricStableReparam(Reparam):
         "Option Pricing with Levy-Stable Processes"
         https://pdfs.semanticscholar.org/4d66/c91b136b2a38117dd16c2693679f5341c616.pdf
     """
-    def __call__(self, name, fn, obs):
+
+    def apply(self, msg):
+        name = msg["name"]
+        fn = msg["fn"]
+        value = msg["value"]
+        is_observed = msg["is_observed"]
+
         fn, event_dim = self._unwrap(fn)
-        assert isinstance(fn, dist.Stable) and fn.coords == "S0"
+        assert (
+            isinstance(fn, dist.Stable)
+            and fn.coords == "S0"
+            and not isinstance(fn, dist.StableWithLogProb)
+        )
         if is_validation_enabled():
             if not (fn.skew == 0).all():
                 raise ValueError("SymmetricStableReparam found nonzero skew")
@@ -93,10 +120,13 @@ class SymmetricStableReparam(Reparam):
         proto = fn.stability
         half_pi = proto.new_tensor(math.pi / 2)
         one = proto.new_ones(proto.shape)
-        u = pyro.sample("{}_uniform".format(name),
-                        self._wrap(dist.Uniform(-half_pi, half_pi).expand(proto.shape), event_dim))
-        e = pyro.sample("{}_exponential".format(name),
-                        self._wrap(dist.Exponential(one), event_dim))
+        u = pyro.sample(
+            "{}_uniform".format(name),
+            self._wrap(dist.Uniform(-half_pi, half_pi).expand(proto.shape), event_dim),
+        )
+        e = pyro.sample(
+            "{}_exponential".format(name), self._wrap(dist.Exponential(one), event_dim)
+        )
 
         # Differentiably transform to scale drawn from a totally-skewed stable variable.
         a = fn.stability
@@ -106,8 +136,8 @@ class SymmetricStableReparam(Reparam):
         scale = scale.clamp(min=torch.finfo(scale.dtype).tiny)
 
         # Construct a scaled Gaussian, using Stable(2,0,s,m) == Normal(m,s*sqrt(2)).
-        new_fn = self._wrap(dist.Normal(fn.loc, scale * (2 ** 0.5)), event_dim)
-        return new_fn, obs
+        new_fn = self._wrap(dist.Normal(fn.loc, scale * (2**0.5)), event_dim)
+        return {"fn": new_fn, "value": value, "is_observed": is_observed}
 
 
 class StableReparam(Reparam):
@@ -129,9 +159,18 @@ class StableReparam(Reparam):
         "One-dimensional stable distributions"
     """
 
-    def __call__(self, name, fn, obs):
+    def apply(self, msg):
+        name = msg["name"]
+        fn = msg["fn"]
+        value = msg["value"]
+        is_observed = msg["is_observed"]
+
         fn, event_dim = self._unwrap(fn)
-        assert isinstance(fn, dist.Stable) and fn.coords == "S0"
+        assert (
+            isinstance(fn, dist.Stable)
+            and fn.coords == "S0"
+            and not isinstance(fn, dist.StableWithLogProb)
+        )
 
         # Strategy: Let X ~ S0(a,b,s,m) be the stable variable of interest.
         # 1. WLOG scale and shift so s=1 and m=0, additionally shifting to convert
@@ -164,14 +203,22 @@ class StableReparam(Reparam):
         proto = fn.stability
         half_pi = proto.new_tensor(math.pi / 2)
         one = proto.new_ones(proto.shape)
-        zu = pyro.sample("{}_z_uniform".format(name),
-                         self._wrap(dist.Uniform(-half_pi, half_pi).expand(proto.shape), event_dim))
-        ze = pyro.sample("{}_z_exponential".format(name),
-                         self._wrap(dist.Exponential(one), event_dim))
-        tu = pyro.sample("{}_t_uniform".format(name),
-                         self._wrap(dist.Uniform(-half_pi, half_pi).expand(proto.shape), event_dim))
-        te = pyro.sample("{}_t_exponential".format(name),
-                         self._wrap(dist.Exponential(one), event_dim))
+        zu = pyro.sample(
+            "{}_z_uniform".format(name),
+            self._wrap(dist.Uniform(-half_pi, half_pi).expand(proto.shape), event_dim),
+        )
+        ze = pyro.sample(
+            "{}_z_exponential".format(name),
+            self._wrap(dist.Exponential(one), event_dim),
+        )
+        tu = pyro.sample(
+            "{}_t_uniform".format(name),
+            self._wrap(dist.Uniform(-half_pi, half_pi).expand(proto.shape), event_dim),
+        )
+        te = pyro.sample(
+            "{}_t_exponential".format(name),
+            self._wrap(dist.Exponential(one), event_dim),
+        )
 
         # Differentiably transform.
         a = fn.stability
@@ -188,8 +235,8 @@ class StableReparam(Reparam):
         scale = scale.clamp(min=torch.finfo(scale.dtype).tiny)
 
         # Construct a scaled Gaussian, using Stable(2,0,s,m) == Normal(m,s*sqrt(2)).
-        new_fn = self._wrap(dist.Normal(loc, scale * (2 ** 0.5)), event_dim)
-        return new_fn, obs
+        new_fn = self._wrap(dist.Normal(loc, scale * (2**0.5)), event_dim)
+        return {"fn": new_fn, "value": value, "is_observed": is_observed}
 
 
 def _unsafe_shift(a, skew, t_scale):

@@ -13,6 +13,7 @@ http://docs.pyro.ai/en/latest/contrib.cevae.html
     http://papers.nips.cc/paper/7223-causal-effect-inference-with-deep-latent-variable-models.pdf
     https://github.com/AMLab-Amsterdam/CEVAE
 """
+
 import argparse
 import logging
 
@@ -37,16 +38,15 @@ def generate_data(args):
     y = dist.Bernoulli(logits=3 * (z + 2 * (2 * t - 2))).sample()
 
     # Compute true ite for evaluation (via Monte Carlo approximation).
-    t0_t1 = torch.tensor([[0.], [1.]])
+    t0_t1 = torch.tensor([[0.0], [1.0]])
     y_t0, y_t1 = dist.Bernoulli(logits=3 * (z + 2 * (2 * t0_t1 - 2))).mean
     true_ite = y_t1 - y_t0
     return x, t, y, true_ite
 
 
 def main(args):
-    pyro.enable_validation(__debug__)
     if args.cuda:
-        torch.set_default_tensor_type('torch.cuda.FloatTensor')
+        torch.set_default_device("cuda")
 
     # Generate synthetic data.
     pyro.set_rng_seed(args.seed)
@@ -55,17 +55,23 @@ def main(args):
     # Train.
     pyro.set_rng_seed(args.seed)
     pyro.clear_param_store()
-    cevae = CEVAE(feature_dim=args.feature_dim,
-                  latent_dim=args.latent_dim,
-                  hidden_dim=args.hidden_dim,
-                  num_layers=args.num_layers,
-                  num_samples=10)
-    cevae.fit(x_train, t_train, y_train,
-              num_epochs=args.num_epochs,
-              batch_size=args.batch_size,
-              learning_rate=args.learning_rate,
-              learning_rate_decay=args.learning_rate_decay,
-              weight_decay=args.weight_decay)
+    cevae = CEVAE(
+        feature_dim=args.feature_dim,
+        latent_dim=args.latent_dim,
+        hidden_dim=args.hidden_dim,
+        num_layers=args.num_layers,
+        num_samples=10,
+    )
+    cevae.fit(
+        x_train,
+        t_train,
+        y_train,
+        num_epochs=args.num_epochs,
+        batch_size=args.batch_size,
+        learning_rate=args.learning_rate,
+        learning_rate_decay=args.learning_rate_decay,
+        weight_decay=args.weight_decay,
+    )
 
     # Evaluate.
     x_test, t_test, y_test, true_ite = generate_data(args)
@@ -81,8 +87,10 @@ def main(args):
 
 
 if __name__ == "__main__":
-    assert pyro.__version__.startswith('1.5.0')
-    parser = argparse.ArgumentParser(description="Causal Effect Variational Autoencoder")
+    assert pyro.__version__.startswith("1.9.1")
+    parser = argparse.ArgumentParser(
+        description="Causal Effect Variational Autoencoder"
+    )
     parser.add_argument("--num-data", default=1000, type=int)
     parser.add_argument("--feature-dim", default=5, type=int)
     parser.add_argument("--latent-dim", default=20, type=int)

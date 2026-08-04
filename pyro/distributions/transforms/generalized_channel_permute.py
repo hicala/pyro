@@ -2,20 +2,21 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import torch
-from torch.distributions import Transform, constraints
+from torch.distributions import Transform
 
-from pyro.distributions.conditional import ConditionalTransformModule
-from pyro.distributions.torch_transform import TransformModule
-from pyro.distributions.util import copy_docs_from
 from pyro.nn import DenseNN
+
+from .. import constraints
+from ..conditional import ConditionalTransformModule
+from ..torch_transform import TransformModule
+from ..util import copy_docs_from
 
 
 @copy_docs_from(Transform)
 class ConditionedGeneralizedChannelPermute(Transform):
-    domain = constraints.real
-    codomain = constraints.real
+    domain = constraints.independent(constraints.real, 3)
+    codomain = constraints.independent(constraints.real, 3)
     bijective = True
-    event_dim = 3
 
     def __init__(self, permutation=None, LU=None):
         super(ConditionedGeneralizedChannelPermute, self).__init__(cache_size=1)
@@ -29,7 +30,9 @@ class ConditionedGeneralizedChannelPermute(Transform):
 
     @property
     def L(self):
-        return self.LU.tril(diagonal=-1) + torch.eye(self.LU.size(-1), dtype=self.LU.dtype, device=self.LU.device)
+        return self.LU.tril(diagonal=-1) + torch.eye(
+            self.LU.size(-1), dtype=self.LU.dtype, device=self.LU.device
+        )
 
     @property
     def U(self):
@@ -83,10 +86,10 @@ class ConditionedGeneralizedChannelPermute(Transform):
         LUx = (y_flat.unsqueeze(-3) * self.permutation.T.unsqueeze(-1)).sum(-2)
 
         # Solve L(Ux) = P^1y
-        Ux, _ = torch.triangular_solve(LUx, self.L, upper=False)
+        Ux = torch.linalg.solve_triangular(self.L, LUx, upper=False)
 
         # Solve Ux = (PL)^-1y
-        x, _ = torch.triangular_solve(Ux, self.U)
+        x = torch.linalg.solve_triangular(self.U, Ux, upper=True)
 
         # Unflatten x (works when context variable has batch dim)
         return x.reshape(x.shape[:-1] + y.shape[-2:])
@@ -99,7 +102,9 @@ class ConditionedGeneralizedChannelPermute(Transform):
 
         h, w = x.shape[-2:]
         log_det = h * w * self.U_diag.abs().log().sum()
-        return log_det * torch.ones(x.size()[:-3], dtype=x.dtype, layout=x.layout, device=x.device)
+        return log_det * torch.ones(
+            x.size()[:-3], dtype=x.dtype, layout=x.layout, device=x.device
+        )
 
 
 @copy_docs_from(ConditionedGeneralizedChannelPermute)
@@ -157,20 +162,19 @@ class GeneralizedChannelPermute(ConditionedGeneralizedChannelPermute, TransformM
 
     """
 
-    domain = constraints.real
-    codomain = constraints.real
+    domain = constraints.independent(constraints.real, 3)
+    codomain = constraints.independent(constraints.real, 3)
     bijective = True
-    event_dim = 3
 
     def __init__(self, channels=3, permutation=None):
         super(GeneralizedChannelPermute, self).__init__()
-        self.__delattr__('permutation')
+        self.__delattr__("permutation")
 
         # Sample a random orthogonal matrix
-        W, _ = torch.qr(torch.randn(channels, channels))
+        W, _ = torch.linalg.qr(torch.randn(channels, channels))
 
         # Construct the partially pivoted LU-form and the pivots
-        LU, pivots = W.lu()
+        LU, pivots = torch.linalg.lu_factor(W)
 
         # Convert the pivots into the permutation matrix
         if permutation is None:
@@ -179,11 +183,13 @@ class GeneralizedChannelPermute(ConditionedGeneralizedChannelPermute, TransformM
             if len(permutation) != channels:
                 raise ValueError(
                     'Keyword argument "permutation" expected to have {} elements but {} found.'.format(
-                        channels, len(permutation)))
+                        channels, len(permutation)
+                    )
+                )
             P = torch.eye(channels, channels)[permutation.type(dtype=torch.int64)]
 
         # We register the permutation matrix so that the model can be serialized
-        self.register_buffer('permutation', P)
+        self.register_buffer("permutation", P)
 
         # NOTE: For this implementation I have chosen to store the parameters densely, rather than
         # storing L, U, and s separately
@@ -254,19 +260,20 @@ class ConditionalGeneralizedChannelPermute(ConditionalTransformModule):
 
     """
 
-    domain = constraints.real
-    codomain = constraints.real
+    domain = constraints.independent(constraints.real, 3)
+    codomain = constraints.independent(constraints.real, 3)
     bijective = True
-    event_dim = 3
 
     def __init__(self, nn, channels=3, permutation=None):
         super().__init__()
         self.nn = nn
         self.channels = channels
         if permutation is None:
-            permutation = torch.randperm(channels, device='cpu').to(torch.Tensor().device)
-        P = torch.eye(len(permutation), len(permutation))[permutation.type(dtype=torch.int64)]
-        self.register_buffer('permutation', P)
+            permutation = torch.randperm(channels)
+        P = torch.eye(len(permutation), len(permutation))[
+            permutation.type(dtype=torch.int64)
+        ]
+        self.register_buffer("permutation", P)
 
     def condition(self, context):
         LU = self.nn(context)

@@ -14,6 +14,15 @@ shaped. These can be used with a variety of inference algorithms, e.g.
     :member-order: bysource
     :special-members: __call__
 
+Automatic Strategies
+--------------------
+.. automodule:: pyro.infer.reparam.strategies
+    :members:
+    :undoc-members:
+    :member-order: bysource
+    :special-members: __call__
+    :show-inheritance:
+
 Conjugate Updating
 ------------------
 .. automodule:: pyro.infer.reparam.conjugate
@@ -26,6 +35,15 @@ Conjugate Updating
 Loc-Scale Decentering
 ---------------------
 .. automodule:: pyro.infer.reparam.loc_scale
+    :members:
+    :undoc-members:
+    :member-order: bysource
+    :special-members: __call__
+    :show-inheritance:
+
+Gumbel-Softmax
+--------------
+.. automodule:: pyro.infer.reparam.softmax
     :members:
     :undoc-members:
     :member-order: bysource
@@ -86,6 +104,15 @@ Stable Distributions
     :special-members: __call__
     :show-inheritance:
 
+Projected Normal Distributions
+------------------------------
+.. automodule:: pyro.infer.reparam.projected_normal
+    :members:
+    :undoc-members:
+    :member-order: bysource
+    :special-members: __call__
+    :show-inheritance:
+
 Hidden Markov Models
 --------------------
 .. automodule:: pyro.infer.reparam.hmm
@@ -107,6 +134,15 @@ Site Splitting
 Neural Transport
 ----------------
 .. automodule:: pyro.infer.reparam.neutra
+    :members:
+    :undoc-members:
+    :member-order: bysource
+    :special-members: __call__
+    :show-inheritance:
+
+Structured Preconditioning
+--------------------------
+.. automodule:: pyro.infer.reparam.structured
     :members:
     :undoc-members:
     :member-order: bysource

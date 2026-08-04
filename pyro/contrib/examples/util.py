@@ -4,54 +4,61 @@
 import os
 import sys
 
-import torchvision
 import torchvision.datasets as datasets
 from torch.utils.data import DataLoader
 from torchvision import transforms
-from torchvision.datasets import MNIST
-
-from pyro.distributions.torch_patch import patch_dependency
 
 
-@patch_dependency('torchvision.datasets.MNIST', torchvision)
-class _MNIST(getattr(MNIST, '_pyro_unpatched', MNIST)):
-    # For older torchvision.
-    urls = [
-        "https://d2hg8soec8ck9v.cloudfront.net/datasets/mnist/train-images-idx3-ubyte.gz",
-        "https://d2hg8soec8ck9v.cloudfront.net/datasets/mnist/train-labels-idx1-ubyte.gz",
-        "https://d2hg8soec8ck9v.cloudfront.net/datasets/mnist/t10k-images-idx3-ubyte.gz",
-        "https://d2hg8soec8ck9v.cloudfront.net/datasets/mnist/t10k-labels-idx1-ubyte.gz",
-    ]
-    # For newer torchvision.
-    resources = list(zip(urls, [
-        "f68b3c2dcbeaaa9fbdd348bbdeb94873",
-        "d53e105ee54ea40749a09fcbcd1e9432",
-        "9fb629c4189551a2d022fa330f9573f3",
-        "ec29112dd5afa0611ce80d1b7f02629c"
-    ]))
+class MNIST(datasets.MNIST):
+    mirrors = ["https://github.com/pyro-ppl/datasets/blob/master/mnist/"]
+
+    def download(self) -> None:
+        """Download the MNIST data if it doesn't exist already."""
+
+        if self._check_exists():
+            return
+
+        os.makedirs(self.raw_folder, exist_ok=True)
+
+        # download files
+        for filename, md5 in self.resources:
+            errors = []
+            for mirror in self.mirrors:
+                url = f"{mirror}{filename}?raw=true"
+                try:
+                    datasets.utils.download_and_extract_archive(
+                        url, download_root=self.raw_folder, filename=filename, md5=md5
+                    )
+                except datasets.URLError as e:
+                    errors.append(e)
+                    continue
+                break
+            else:
+                s = f"Error downloading {filename}:\n"
+                for mirror, err in zip(self.mirrors, errors):
+                    s += f"Tried {mirror}, got:\n{str(err)}\n"
+                raise RuntimeError(s)
 
 
-def get_data_loader(dataset_name,
-                    data_dir,
-                    batch_size=1,
-                    dataset_transforms=None,
-                    is_training_set=True,
-                    shuffle=True):
+def get_data_loader(
+    dataset_name,
+    data_dir,
+    batch_size=1,
+    dataset_transforms=None,
+    is_training_set=True,
+    shuffle=True,
+):
     if not dataset_transforms:
         dataset_transforms = []
     trans = transforms.Compose([transforms.ToTensor()] + dataset_transforms)
-    dataset = getattr(datasets, dataset_name)
+    if dataset_name == "MNIST":
+        dataset = MNIST
+    else:
+        dataset = getattr(datasets, dataset_name)
     print("downloading data")
-    dset = dataset(root=data_dir,
-                   train=is_training_set,
-                   transform=trans,
-                   download=True)
+    dset = dataset(root=data_dir, train=is_training_set, transform=trans, download=True)
     print("download complete.")
-    return DataLoader(
-        dset,
-        batch_size=batch_size,
-        shuffle=shuffle
-    )
+    return DataLoader(dset, batch_size=batch_size, shuffle=shuffle)
 
 
 def print_and_log(logger, msg):
@@ -64,10 +71,9 @@ def print_and_log(logger, msg):
 
 
 def get_data_directory(filepath=None):
-    if 'CI' in os.environ:
-        return os.path.expanduser('~/.data')
-    return os.path.abspath(os.path.join(os.path.dirname(filepath),
-                                        '.data'))
+    if "CI" in os.environ:
+        return os.path.expanduser("~/.data")
+    return os.path.abspath(os.path.join(os.path.dirname(filepath), ".data"))
 
 
 def _mkdir_p(dirname):

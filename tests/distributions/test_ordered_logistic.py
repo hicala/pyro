@@ -3,12 +3,10 @@
 
 import pytest
 import torch
-import torch.tensor as tt
 from torch.autograd.functional import jacobian
 
-from pyro.distributions import OrderedLogistic, Normal
+from pyro.distributions import Normal, OrderedLogistic
 from pyro.distributions.transforms import OrderedTransform
-
 
 # Tests for the OrderedLogistic distribution
 
@@ -28,9 +26,9 @@ def test_sample(n_cutpoints, pred_shape):
 def test_constraints():
     predictor = torch.randn(5)
     for cp in (
-        tt([1, 2, 3, 4, 0]),
-        tt([1, 2, 4, 3, 5]),
-        tt([1, 2, 3, 4, 4]),
+        torch.tensor([1, 2, 3, 4, 0]),
+        torch.tensor([1, 2, 4, 3, 5]),
+        torch.tensor([1, 2, 3, 4, 4]),
     ):
         with pytest.raises(ValueError):
             OrderedLogistic(predictor, cp)
@@ -42,7 +40,7 @@ def test_broadcast():
     for cp in (
         torch.arange(5),
         torch.arange(5).view(1, -1),
-        torch.stack(4*[torch.arange(5)]),
+        torch.stack(4 * [torch.arange(5)]),
         torch.sort(torch.randn(3, 4, 5), dim=-1).values,
         torch.sort(torch.randn(predictor.shape + (100,)), dim=-1).values,
     ):

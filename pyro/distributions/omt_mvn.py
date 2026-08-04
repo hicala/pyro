@@ -21,7 +21,11 @@ class OMTMultivariateNormal(MultivariateNormal):
     :param torch.Tensor loc: Mean.
     :param torch.Tensor scale_tril: Cholesky of Covariance matrix.
     """
-    arg_constraints = {"loc": constraints.real, "scale_tril": constraints.lower_triangular}
+
+    arg_constraints = {
+        "loc": constraints.real,
+        "scale_tril": constraints.lower_triangular,
+    }
 
     def __init__(self, loc, scale_tril):
         if loc.dim() != 1:
@@ -31,7 +35,9 @@ class OMTMultivariateNormal(MultivariateNormal):
         super().__init__(loc, scale_tril=scale_tril)
 
     def rsample(self, sample_shape=torch.Size()):
-        return _OMTMVNSample.apply(self.loc, self.scale_tril, sample_shape + self.loc.shape)
+        return _OMTMVNSample.apply(
+            self.loc, self.scale_tril, sample_shape + self.loc.shape
+        )
 
 
 class _OMTMVNSample(Function):
@@ -53,7 +59,7 @@ class _OMTMVNSample(Function):
         loc_grad = sum_leftmost(grad_output, -1)
 
         identity = eye_like(g, dim)
-        R_inv = torch.triangular_solve(identity, L.t(), transpose=False, upper=True)[0]
+        R_inv = torch.linalg.solve_triangular(L.t(), identity, upper=True)
 
         z_ja = z.unsqueeze(-1)
         g_R_inv = torch.matmul(g, R_inv).unsqueeze(-2)
@@ -62,18 +68,22 @@ class _OMTMVNSample(Function):
         diff_L_ab = 0.5 * sum_leftmost(g_ja * epsilon_jb + g_R_inv * z_ja, -2)
 
         Sigma_inv = torch.mm(R_inv, R_inv.t())
-        V, D, _ = torch.svd(Sigma_inv + jitter)
+        V, D, _ = torch.linalg.svd(Sigma_inv + jitter)
         D_outer = D.unsqueeze(-1) + D.unsqueeze(0)
 
         expand_tuple = tuple([-1] * (z.dim() - 1) + [dim, dim])
         z_tilde = identity * torch.matmul(z, V).unsqueeze(-1).expand(*expand_tuple)
         g_tilde = identity * torch.matmul(g, V).unsqueeze(-1).expand(*expand_tuple)
 
-        Y = sum_leftmost(torch.matmul(z_tilde, torch.matmul(1.0 / D_outer, g_tilde)), -2)
+        Y = sum_leftmost(
+            torch.matmul(z_tilde, torch.matmul(1.0 / D_outer, g_tilde)), -2
+        )
         Y = torch.mm(V, torch.mm(Y, V.t()))
         Y = Y + Y.t()
 
-        Tr_xi_Y = torch.mm(torch.mm(Sigma_inv, Y), R_inv) - torch.mm(Y, torch.mm(Sigma_inv, R_inv))
+        Tr_xi_Y = torch.mm(torch.mm(Sigma_inv, Y), R_inv) - torch.mm(
+            Y, torch.mm(Sigma_inv, R_inv)
+        )
         diff_L_ab += 0.5 * Tr_xi_Y
         L_grad = torch.tril(diff_L_ab)
 

@@ -54,6 +54,14 @@ ________________
     :undoc-members:
     :show-inheritance:
 
+EqualizeMessenger
+____________________
+
+.. automodule:: pyro.poutine.equalize_messenger
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 EscapeMessenger
 ________________
 
@@ -158,6 +166,14 @@ __________________
     :undoc-members:
     :show-inheritance:
 
+SubstituteMessenger
+___________________
+
+.. automodule:: pyro.poutine.substitute_messenger
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 TraceMessenger
 _______________
 
@@ -172,4 +188,14 @@ ____________________
 .. automodule:: pyro.poutine.uncondition_messenger
     :members:
     :undoc-members:
+    :show-inheritance:
+
+GuideMessenger
+______________
+
+.. automodule:: pyro.poutine.guide
+    :members:
+    :undoc-members:
+    :special-members: __call__
+    :member-order: bysource
     :show-inheritance:

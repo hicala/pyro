@@ -26,20 +26,40 @@ def plot_conditional_samples_ssvae(ssvae, visdom_session):
 
 
 def plot_llk(train_elbo, test_elbo):
+    from pathlib import Path
+
     import matplotlib.pyplot as plt
-    import numpy as np
     import pandas as pd
-    import scipy as sp
     import seaborn as sns
+
+    Path("vae_results").mkdir(parents=True, exist_ok=True)
+
     plt.figure(figsize=(30, 10))
     sns.set_style("whitegrid")
-    data = np.concatenate([np.arange(len(test_elbo))[:, sp.newaxis], -test_elbo[:, sp.newaxis]], axis=1)
-    df = pd.DataFrame(data=data, columns=['Training Epoch', 'Test ELBO'])
-    g = sns.FacetGrid(df, size=10, aspect=1.5)
-    g.map(plt.scatter, "Training Epoch", "Test ELBO")
-    g.map(plt.plot, "Training Epoch", "Test ELBO")
-    plt.savefig('./vae_results/test_elbo_vae.png')
-    plt.close('all')
+    df1 = pd.DataFrame(
+        {
+            "Epoch": train_elbo.keys(),
+            "ELBO": [-val for val in train_elbo.values()],
+            "dataset": "Train",
+        }
+    )
+    df2 = pd.DataFrame(
+        {
+            "Epoch": test_elbo.keys(),
+            "ELBO": [-val for val in test_elbo.values()],
+            "dataset": "Test",
+        }
+    )
+    df = pd.concat([df1, df2], axis=0)
+
+    # Create the FacetGrid with scatter plot
+    g = sns.FacetGrid(df, height=4, aspect=1.5, hue="dataset")
+    g.map(sns.scatterplot, "Epoch", "ELBO")
+    g.map(sns.lineplot, "Epoch", "ELBO", linestyle="--")
+    g.ax.yaxis.get_major_locator().set_params(integer=True)
+    g.add_legend()
+    plt.savefig("./vae_results/test_elbo_vae.png")
+    plt.close("all")
 
 
 def plot_vae_samples(vae, visdom_session):
@@ -59,7 +79,7 @@ def mnist_test_tsne(vae=None, test_loader=None):
     """
     This is used to generate a t-sne embedding of the vae
     """
-    name = 'VAE'
+    name = "VAE"
     data = test_loader.dataset.test_data.float()
     mnist_labels = test_loader.dataset.test_labels
     z_loc, z_scale = vae.encoder(data)
@@ -71,7 +91,7 @@ def mnist_test_tsne_ssvae(name=None, ssvae=None, test_loader=None):
     This is used to generate a t-sne embedding of the ss-vae
     """
     if name is None:
-        name = 'SS-VAE'
+        name = "SS-VAE"
     data = test_loader.dataset.test_data.float()
     mnist_labels = test_loader.dataset.test_labels
     z_loc, z_scale = ssvae.encoder_z([data, mnist_labels])
@@ -80,10 +100,12 @@ def mnist_test_tsne_ssvae(name=None, ssvae=None, test_loader=None):
 
 def plot_tsne(z_loc, classes, name):
     import matplotlib
-    matplotlib.use('Agg')
+
+    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     import numpy as np
     from sklearn.manifold import TSNE
+
     model_tsne = TSNE(n_components=2, random_state=0)
     z_states = z_loc.detach().cpu().numpy()
     z_embed = model_tsne.fit_transform(z_states)
@@ -96,5 +118,5 @@ def plot_tsne(z_loc, classes, name):
         color = plt.cm.Set1(ic)
         plt.scatter(z_embed[ind_class, 0], z_embed[ind_class, 1], s=10, color=color)
         plt.title("Latent Variable T-SNE per Class")
-        fig.savefig('./vae_results/'+str(name)+'_embedding_'+str(ic)+'.png')
-    fig.savefig('./vae_results/'+str(name)+'_embedding.png')
+        fig.savefig("./vae_results/" + str(name) + "_embedding_" + str(ic) + ".png")
+    fig.savefig("./vae_results/" + str(name) + "_embedding.png")

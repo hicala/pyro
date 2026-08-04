@@ -6,7 +6,12 @@ import torch
 from torch.distributions import transform_to
 
 import pyro.distributions as dist
-from pyro.contrib.forecast.util import UNIVARIATE_DISTS, UNIVARIATE_TRANSFORMS, prefix_condition, reshape_batch
+from pyro.contrib.forecast.util import (
+    UNIVARIATE_DISTS,
+    UNIVARIATE_TRANSFORMS,
+    prefix_condition,
+    reshape_batch,
+)
 from tests.ops.gaussian import random_mvn
 
 DISTS = [
@@ -27,10 +32,13 @@ DISTS = [
     dist.Laplace,
     dist.LinearHMM,
     dist.LogNormal,
+    dist.MaskedDistribution,
     dist.MultivariateNormal,
     dist.NegativeBinomial,
     dist.Normal,
     dist.StudentT,
+    dist.TransformedDistribution,
+    dist.Uniform,
     dist.ZeroInflatedPoisson,
     dist.ZeroInflatedNegativeBinomial,
 ]
@@ -39,18 +47,39 @@ DISTS = [
 def random_dist(Dist, shape, transform=None):
     if Dist is dist.FoldedDistribution:
         return Dist(random_dist(dist.Normal, shape))
+    elif Dist is dist.MaskedDistribution:
+        base_dist = random_dist(dist.Normal, shape)
+        mask = torch.empty(shape, dtype=torch.bool).bernoulli_(0.5)
+        return base_dist.mask(mask)
+    elif Dist is dist.TransformedDistribution:
+        base_dist = random_dist(dist.Normal, shape)
+        transforms = [
+            dist.transforms.ExpTransform(),
+            dist.transforms.ComposeTransform(
+                [
+                    dist.transforms.AffineTransform(1, 1),
+                    dist.transforms.ExpTransform().inv,
+                ]
+            ),
+        ]
+        return dist.TransformedDistribution(base_dist, transforms)
     elif Dist in (dist.GaussianHMM, dist.LinearHMM):
         batch_shape, duration, obs_dim = shape[:-2], shape[-2], shape[-1]
         hidden_dim = obs_dim + 1
         init_dist = random_dist(dist.Normal, batch_shape + (hidden_dim,)).to_event(1)
         trans_mat = torch.randn(batch_shape + (duration, hidden_dim, hidden_dim))
-        trans_dist = random_dist(dist.Normal, batch_shape + (duration, hidden_dim)).to_event(1)
+        trans_dist = random_dist(
+            dist.Normal, batch_shape + (duration, hidden_dim)
+        ).to_event(1)
         obs_mat = torch.randn(batch_shape + (duration, hidden_dim, obs_dim))
-        obs_dist = random_dist(dist.Normal, batch_shape + (duration, obs_dim)).to_event(1)
+        obs_dist = random_dist(dist.Normal, batch_shape + (duration, obs_dim)).to_event(
+            1
+        )
         if Dist is dist.LinearHMM and transform is not None:
             obs_dist = dist.TransformedDistribution(obs_dist, transform)
-        return Dist(init_dist, trans_mat, trans_dist, obs_mat, obs_dist,
-                    duration=duration)
+        return Dist(
+            init_dist, trans_mat, trans_dist, obs_mat, obs_dist, duration=duration
+        )
     elif Dist is dist.IndependentHMM:
         batch_shape, duration, obs_dim = shape[:-2], shape[-2], shape[-1]
         base_shape = batch_shape + (obs_dim, duration, 1)
@@ -58,10 +87,15 @@ def random_dist(Dist, shape, transform=None):
         return Dist(base_dist)
     elif Dist is dist.MultivariateNormal:
         return random_mvn(shape[:-1], shape[-1])
+    elif Dist is dist.Uniform:
+        low = torch.randn(shape)
+        high = low + torch.randn(shape).exp()
+        return Dist(low, high)
     else:
         params = {
             name: transform_to(Dist.arg_constraints[name])(torch.rand(shape) - 0.5)
-            for name in UNIVARIATE_DISTS[Dist]}
+            for name in UNIVARIATE_DISTS[Dist]
+        }
         return Dist(**params)
 
 
@@ -103,8 +137,10 @@ def test_reshape_batch(Dist, batch_shape, duration, dim):
 @pytest.mark.parametrize("batch_shape", [(), (6,), (5, 4)])
 @pytest.mark.parametrize("transform", list(UNIVARIATE_TRANSFORMS.keys()))
 def test_reshape_transform_batch(transform, batch_shape, duration, dim):
-    params = {p: torch.rand(batch_shape + (duration, dim))
-              for p in UNIVARIATE_TRANSFORMS[transform]}
+    params = {
+        p: torch.rand(batch_shape + (duration, dim))
+        for p in UNIVARIATE_TRANSFORMS[transform]
+    }
     t = transform(**params)
     d = random_dist(dist.LinearHMM, batch_shape + (duration, dim), transform=t)
     d = d.to_event(2 - d.event_dim)

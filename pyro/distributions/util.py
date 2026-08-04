@@ -15,7 +15,17 @@ from torch.distributions.utils import broadcast_all
 
 from pyro.util import ignore_jit_warnings
 
-_VALIDATION_ENABLED = False
+from .. import settings
+
+_VALIDATION_ENABLED = __debug__
+torch_dist.Distribution.set_default_validate_args(__debug__)
+
+settings.register("validate_distributions_pyro", __name__, "_VALIDATION_ENABLED")
+settings.register(
+    "validate_distributions_torch",
+    "torch.distributions.distribution",
+    "Distribution._validate_args",
+)
 
 log_sum_exp = logsumexp  # DEPRECATED
 
@@ -30,26 +40,26 @@ def copy_docs_from(source_class, full_text=False):
         # if not destin_class.__doc__:
         #     destin_class.__doc__ = source_class.__doc__
         for name in dir(destin_class):
-            if name.startswith('_'):
+            if name.startswith("_"):
                 continue
             destin_attr = getattr(destin_class, name)
-            destin_attr = getattr(destin_attr, '__func__', destin_attr)
+            destin_attr = getattr(destin_attr, "__func__", destin_attr)
             source_attr = getattr(source_class, name, None)
-            source_doc = getattr(source_attr, '__doc__', None)
-            if source_doc and not getattr(destin_attr, '__doc__', None):
-                if full_text or source_doc.startswith('See '):
+            source_doc = getattr(source_attr, "__doc__", None)
+            if source_doc and not getattr(destin_attr, "__doc__", None):
+                if full_text or source_doc.startswith("See "):
                     destin_doc = source_doc
                 else:
-                    destin_doc = 'See :meth:`{}.{}.{}`'.format(
-                        source_class.__module__, source_class.__name__, name)
+                    destin_doc = "See :meth:`{}.{}.{}`".format(
+                        source_class.__module__, source_class.__name__, name
+                    )
                 if isinstance(destin_attr, property):
                     # Set docs for object properties.
                     # Since __doc__ is read-only, we need to reset the property
                     # with the updated doc.
-                    updated_property = property(destin_attr.fget,
-                                                destin_attr.fset,
-                                                destin_attr.fdel,
-                                                destin_doc)
+                    updated_property = property(
+                        destin_attr.fget, destin_attr.fset, destin_attr.fdel, destin_doc
+                    )
                     setattr(destin_class, name, updated_property)
                 else:
                     destin_attr.__doc__ = destin_doc
@@ -74,11 +84,13 @@ def weakmethod(fn):
             def _callback(self, result):
                 print(result)
     """
+
     def weak_fn(weakself, *args, **kwargs):
         self = weakself()
         if self is None:
-            raise AttributeError("self was garbage collected when calling self.{}"
-                                 .format(fn.__name__))
+            raise AttributeError(
+                "self was garbage collected when calling self.{}".format(fn.__name__)
+            )
         return fn(self, *args, **kwargs)
 
     @property
@@ -88,8 +100,12 @@ def weakmethod(fn):
 
     @weak_binder.setter
     def weak_binder(self, new):
-        if not (isinstance(new, functools.partial) and new.func is weak_fn and
-                len(new.args) == 1 and new.args[0] is weakref.ref(self)):
+        if not (
+            isinstance(new, functools.partial)
+            and new.func is weak_fn
+            and len(new.args) == 1
+            and new.args[0] is weakref.ref(self)
+        ):
             raise AttributeError("cannot overwrite weakmethod {}".format(fn.__name__))
 
     return weak_binder
@@ -122,15 +138,50 @@ def detach(obj):
     return copy.deepcopy(obj, memo)
 
 
+class _DeepToMemo(dict):
+    def __init__(self, to_args, to_kwargs):
+        super().__init__()
+        self._to_args = to_args
+        self._to_kwargs = to_kwargs
+
+    def get(self, key, default=None):
+        result = super().get(key, default)
+        if result is default:
+            # Assume key is the id of another object, and look up that object.
+            old = ctypes.cast(key, ctypes.py_object).value
+            if isinstance(old, torch.Tensor):
+                self[key] = result = old.to(*self._to_args, **self._to_kwargs)
+            elif isinstance(old, torch.nn.Module):
+                old.to(*self._to_args, **self._to_kwargs)
+        return result
+
+
+def deep_to(obj, *args, **kwargs):
+    r"""
+    Create a deep copy of an arbitrary Python object, calling ``.to(*args,
+    **kwargs)`` on all :class:`torch.Tensor` s and :class:`torch.nn.Module` s
+    in that object.
+
+    Like :meth:`torch.Tensor.to` but unlike :meth:`torch.nn.Module.to`, this
+    creates new objects. For compatibility with existing PyTorch module
+    behavior, this first calls :meth:`torch.nn.Module.to` in-place, then
+    creates a deep copy of the module.
+
+    :param obj: Any python object.
+    :param \*args:
+    :param \*\*kwargs: See :meth:`torch.Tensor.to`.
+    :returns: A deep copy of ``obj`` with all :class:`torch.Tensor` s and
+        :class:`torch.nn.Module` s mapped.
+    """
+    memo = _DeepToMemo(args, kwargs)
+    return copy.deepcopy(obj, memo)
+
+
 # Import a lazy jit.script decorator only if available.
 torch_jit_script_if_tracing = getattr(
     torch.jit,
     "script_if_tracing",
-    getattr(
-        torch.jit,
-        "_script_if_tracing",
-        torch.jit.script
-    ),
+    getattr(torch.jit, "_script_if_tracing", torch.jit.script),
 )
 
 
@@ -171,7 +222,7 @@ def broadcast_shape(*shapes, **kwargs):
     :rtype: tuple
     :raises: ValueError
     """
-    strict = kwargs.pop('strict', False)
+    strict = kwargs.pop("strict", False)
     reversed_shape = []
     for shape in shapes:
         for i, size in enumerate(reversed(shape)):
@@ -180,8 +231,11 @@ def broadcast_shape(*shapes, **kwargs):
             elif reversed_shape[i] == 1 and not strict:
                 reversed_shape[i] = size
             elif reversed_shape[i] != size and (size != 1 or strict):
-                raise ValueError('shape mismatch: objects cannot be broadcast to a single shape: {}'.format(
-                    ' vs '.join(map(str, shapes))))
+                raise ValueError(
+                    "shape mismatch: objects cannot be broadcast to a single shape: {}".format(
+                        " vs ".join(map(str, shapes))
+                    )
+                )
     return tuple(reversed(reversed_shape))
 
 
@@ -263,12 +317,14 @@ def scale_and_mask(tensor, scale=1.0, mask=None):
     :param scale: a positive scale
     :type scale: torch.Tensor or number
     :param mask: an optional masking tensor
-    :type mask: torch.BoolTensor or None
+    :type mask: torch.BoolTensor, bool, or None
     """
     if is_identically_zero(tensor) or (mask is None and is_identically_one(scale)):
         return tensor
-    if mask is None:
+    if mask is None or mask is True:
         return tensor * scale
+    if mask is False:
+        return torch.zeros_like(tensor)
     return torch.where(mask, tensor * scale, tensor.new_zeros(()))
 
 
@@ -281,7 +337,7 @@ def eye_like(value, m, n=None):
     if n is None:
         n = m
     eye = torch.zeros(m, n, dtype=value.dtype, device=value.device)
-    eye.view(-1)[:min(m, n) * n:n + 1] = 1
+    eye.view(-1)[: min(m, n) * n : n + 1] = 1
     return eye
 
 

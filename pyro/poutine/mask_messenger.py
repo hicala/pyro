@@ -1,11 +1,14 @@
 # Copyright (c) 2017-2019 Uber Technologies, Inc.
 # SPDX-License-Identifier: Apache-2.0
 
+from typing import TYPE_CHECKING, Union
+
 import torch
 
-from pyro.util import ignore_jit_warnings
+from pyro.poutine.messenger import Messenger
 
-from .messenger import Messenger
+if TYPE_CHECKING:
+    from pyro.poutine.runtime import Message
 
 
 class MaskMessenger(Messenger):
@@ -18,18 +21,20 @@ class MaskMessenger(Messenger):
         (1 includes a site, 0 excludes a site)
     :returns: stochastic function decorated with a :class:`~pyro.poutine.scale_messenger.MaskMessenger`
     """
-    def __init__(self, mask):
+
+    def __init__(self, mask: Union[bool, torch.BoolTensor]) -> None:
         if isinstance(mask, torch.Tensor):
             if mask.dtype != torch.bool:
-                raise ValueError('Expected mask to be a BoolTensor but got {}'.format(type(mask)))
-        else:
-            if mask not in (True, False):
-                raise ValueError('Expected mask to be a boolean but got {}'.format(type(mask)))
-            with ignore_jit_warnings():
-                mask = torch.tensor(mask)
+                raise ValueError(
+                    "Expected mask to be a BoolTensor but got {}".format(type(mask))
+                )
+
+        elif mask not in (True, False):
+            raise ValueError(
+                "Expected mask to be a boolean but got {}".format(type(mask))
+            )
         super().__init__()
         self.mask = mask
 
-    def _process_message(self, msg):
-        msg["mask"] = self.mask if msg["mask"] is None else self.mask & msg["mask"]
-        return None
+    def _process_message(self, msg: "Message") -> None:
+        msg["mask"] = self.mask if msg["mask"] is None else msg["mask"] & self.mask

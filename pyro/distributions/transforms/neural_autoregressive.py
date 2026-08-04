@@ -6,14 +6,15 @@ from functools import partial
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributions import constraints
 from torch.distributions.transforms import SigmoidTransform, TanhTransform
 
-from pyro.distributions.conditional import ConditionalTransformModule
-from pyro.distributions.torch_transform import TransformModule
-from pyro.distributions.transforms.basic import ELUTransform, LeakyReLUTransform
-from pyro.distributions.util import copy_docs_from
 from pyro.nn import AutoRegressiveNN, ConditionalAutoRegressiveNN
+
+from .. import constraints
+from ..conditional import ConditionalTransformModule
+from ..torch_transform import TransformModule
+from ..util import copy_docs_from
+from .basic import ELUTransform, LeakyReLUTransform
 
 eps = 1e-8
 
@@ -61,19 +62,19 @@ class NeuralAutoregressive(TransformModule):
     domain = constraints.real_vector
     codomain = constraints.real_vector
     bijective = True
-    event_dim = 1
     eps = 1e-8
     autoregressive = True
 
-    def __init__(self, autoregressive_nn, hidden_units=16, activation='sigmoid'):
+    def __init__(self, autoregressive_nn, hidden_units=16, activation="sigmoid"):
         super().__init__(cache_size=1)
 
         # Create the intermediate transform used
         name_to_mixin = {
-            'ELU': ELUTransform,
-            'LeakyReLU': LeakyReLUTransform,
-            'sigmoid': SigmoidTransform,
-            'tanh': TanhTransform}
+            "ELU": ELUTransform,
+            "LeakyReLU": LeakyReLUTransform,
+            "sigmoid": SigmoidTransform,
+            "tanh": TanhTransform,
+        }
         if activation not in name_to_mixin:
             raise ValueError('Invalid activation function "{}"'.format(activation))
         self.T = name_to_mixin[activation]()
@@ -129,8 +130,12 @@ class NeuralAutoregressive(TransformModule):
         T = self.T
 
         log_dydD = self._cached_log_df_inv_dx
-        log_dDdx = torch.logsumexp(torch.log(A + self.eps) + self.logsoftmax(W_pre) +
-                                   T.log_abs_det_jacobian(C, T_C), dim=-2)
+        log_dDdx = torch.logsumexp(
+            torch.log(A + self.eps)
+            + self.logsoftmax(W_pre)
+            + T.log_abs_det_jacobian(C, T_C),
+            dim=-2,
+        )
         log_det = log_dydD + log_dDdx
         return log_det.sum(-1)
 
@@ -185,7 +190,6 @@ class ConditionalNeuralAutoregressive(ConditionalTransformModule):
     domain = constraints.real_vector
     codomain = constraints.real_vector
     bijective = True
-    event_dim = 1
 
     def __init__(self, autoregressive_nn, **kwargs):
         super().__init__()
@@ -205,7 +209,7 @@ class ConditionalNeuralAutoregressive(ConditionalTransformModule):
         return NeuralAutoregressive(cond_nn, **self.kwargs)
 
 
-def neural_autoregressive(input_dim, hidden_dims=None, activation='sigmoid', width=16):
+def neural_autoregressive(input_dim, hidden_dims=None, activation="sigmoid", width=16):
     """
     A helper function to create a
     :class:`~pyro.distributions.transforms.NeuralAutoregressive` object that takes
@@ -232,7 +236,9 @@ def neural_autoregressive(input_dim, hidden_dims=None, activation='sigmoid', wid
     return NeuralAutoregressive(arn, hidden_units=width, activation=activation)
 
 
-def conditional_neural_autoregressive(input_dim, context_dim, hidden_dims=None, activation='sigmoid', width=16):
+def conditional_neural_autoregressive(
+    input_dim, context_dim, hidden_dims=None, activation="sigmoid", width=16
+):
     """
     A helper function to create a
     :class:`~pyro.distributions.transforms.ConditionalNeuralAutoregressive` object
@@ -257,5 +263,9 @@ def conditional_neural_autoregressive(input_dim, context_dim, hidden_dims=None, 
 
     if hidden_dims is None:
         hidden_dims = [3 * input_dim + 1]
-    arn = ConditionalAutoRegressiveNN(input_dim, context_dim, hidden_dims, param_dims=[width] * 3)
-    return ConditionalNeuralAutoregressive(arn, hidden_units=width, activation=activation)
+    arn = ConditionalAutoRegressiveNN(
+        input_dim, context_dim, hidden_dims, param_dims=[width] * 3
+    )
+    return ConditionalNeuralAutoregressive(
+        arn, hidden_units=width, activation=activation
+    )

@@ -4,10 +4,10 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributions import constraints
 
-from pyro.distributions.torch_transform import TransformModule
-from pyro.distributions.util import copy_docs_from
+from .. import constraints
+from ..torch_transform import TransformModule
+from ..util import copy_docs_from
 
 
 @copy_docs_from(TransformModule)
@@ -73,7 +73,6 @@ class BatchNorm(TransformModule):
     domain = constraints.real
     codomain = constraints.real
     bijective = True
-    event_dim = 0
 
     def __init__(self, input_dim, momentum=0.1, epsilon=1e-5):
         super().__init__()
@@ -84,8 +83,8 @@ class BatchNorm(TransformModule):
         self.momentum = momentum
         self.epsilon = epsilon
 
-        self.register_buffer('moving_mean', torch.zeros(input_dim))
-        self.register_buffer('moving_variance', torch.ones(input_dim))
+        self.register_buffer("moving_mean", torch.zeros(input_dim))
+        self.register_buffer("moving_variance", torch.ones(input_dim))
 
     @property
     def constrained_gamma(self):
@@ -101,8 +100,9 @@ class BatchNorm(TransformModule):
         the base distribution (or the output of a previous transform)
         """
         # Enforcing the constraint that gamma is positive
-        return (x - self.beta) / self.constrained_gamma * \
-            torch.sqrt(self.moving_variance + self.epsilon) + self.moving_mean
+        return (x - self.beta) / self.constrained_gamma * torch.sqrt(
+            self.moving_variance + self.epsilon
+        ) + self.moving_mean
 
     def _inverse(self, y):
         """
@@ -124,7 +124,9 @@ class BatchNorm(TransformModule):
         else:
             mean, var = self.moving_mean, self.moving_variance
 
-        return (y - mean) * self.constrained_gamma / torch.sqrt(var + self.epsilon) + self.beta
+        return (y - mean) * self.constrained_gamma / torch.sqrt(
+            var + self.epsilon
+        ) + self.beta
 
     def log_abs_det_jacobian(self, x, y):
         """
@@ -135,7 +137,7 @@ class BatchNorm(TransformModule):
         else:
             # NOTE: You wouldn't typically run this function in eval mode, but included for gradient tests
             var = self.moving_variance
-        return (-self.constrained_gamma.log() + 0.5 * torch.log(var + self.epsilon))
+        return -self.constrained_gamma.log() + 0.5 * torch.log(var + self.epsilon)
 
 
 def batchnorm(input_dim, **kwargs):

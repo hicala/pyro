@@ -2,12 +2,17 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import warnings
+from typing import TYPE_CHECKING, Callable, Dict, Set, Union
+
+from typing_extensions import Self
 
 from pyro import params
 from pyro.distributions.distribution import Distribution
+from pyro.poutine.messenger import Messenger
 from pyro.poutine.util import is_validation_enabled
 
-from .messenger import Messenger
+if TYPE_CHECKING:
+    from pyro.poutine.runtime import Message
 
 
 class LiftMessenger(Messenger):
@@ -40,7 +45,10 @@ class LiftMessenger(Messenger):
     :returns: ``fn`` decorated with a :class:`~pyro.poutine.lift_messenger.LiftMessenger`
     """
 
-    def __init__(self, prior):
+    def __init__(
+        self,
+        prior: Union[Callable, Distribution, Dict[str, Union[Distribution, Callable]]],
+    ) -> None:
         """
         :param prior: prior used to lift parameters. Prior can be of type
                       dict, pyro.distributions, or a python stochastic fn
@@ -49,30 +57,32 @@ class LiftMessenger(Messenger):
         """
         super().__init__()
         self.prior = prior
-        self._samples_cache = {}
+        self._samples_cache: Dict[str, "Message"] = {}
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         self._samples_cache = {}
         if is_validation_enabled() and isinstance(self.prior, dict):
-            self._param_hits = set()
-            self._param_misses = set()
+            self._param_hits: Set[str] = set()
+            self._param_misses: Set[str] = set()
         return super().__enter__()
 
-    def __exit__(self, *args, **kwargs):
+    def __exit__(self, *args, **kwargs) -> None:
         self._samples_cache = {}
         if is_validation_enabled() and isinstance(self.prior, dict):
             extra = set(self.prior) - self._param_hits
             if extra:
                 warnings.warn(
                     "pyro.module prior did not find params ['{}']. "
-                    "Did you instead mean one of ['{}']?"
-                    .format("', '".join(extra), "', '".join(self._param_misses)))
+                    "Did you instead mean one of ['{}']?".format(
+                        "', '".join(extra), "', '".join(self._param_misses)
+                    )
+                )
         return super().__exit__(*args, **kwargs)
 
-    def _pyro_sample(self, msg):
+    def _pyro_sample(self, msg: "Message") -> None:
         return None
 
-    def _pyro_param(self, msg):
+    def _pyro_param(self, msg: "Message") -> None:
         """
         Overrides the `pyro.param` call with samples sampled from the
         distribution specified in the prior. The prior can be a
@@ -80,6 +90,7 @@ class LiftMessenger(Messenger):
         on the param names. If the param name does not match the
         name the keys in the prior, that param name is unchanged.
         """
+        assert msg["name"] is not None
         name = msg["name"]
         param_name = params.user_param_name(name)
         if isinstance(self.prior, dict):
@@ -87,7 +98,7 @@ class LiftMessenger(Messenger):
             if param_name in self.prior.keys():
                 msg["fn"] = self.prior[param_name]
                 msg["args"] = msg["args"][1:]
-                if isinstance(msg['fn'], Distribution):
+                if isinstance(msg["fn"], Distribution):
                     msg["args"] = ()
                     msg["kwargs"] = {}
                     msg["infer"] = {}
@@ -104,19 +115,17 @@ class LiftMessenger(Messenger):
             msg["kwargs"] = {}
             msg["infer"] = {}
         elif callable(self.prior):
-            if not isinstance(self.prior, Distribution):
-                # prior is a stochastic fn. block sample
-                msg["stop"] = True
+            # prior is a stochastic fn. block sample
+            msg["stop"] = True
             msg["fn"] = self.prior
             msg["args"] = msg["args"][1:]
         else:
-            # otherwise leave as is
-            return None
+            raise TypeError("unreachable")
         msg["type"] = "sample"
         if name in self._samples_cache:
             # Multiple pyro.param statements with the same
             # name. Block the site and fix the value.
-            msg['value'] = self._samples_cache[name]['value']
+            msg["value"] = self._samples_cache[name]["value"]
             msg["is_observed"] = True
             msg["stop"] = True
         else:

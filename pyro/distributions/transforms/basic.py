@@ -5,8 +5,9 @@ import math
 
 import torch
 import torch.nn.functional as F
-from torch.distributions import constraints
 from torch.distributions.transforms import TanhTransform, Transform
+
+from .. import constraints
 
 # TODO: Move upstream
 
@@ -15,6 +16,7 @@ class ELUTransform(Transform):
     r"""
     Bijective transform via the mapping :math:`y = \text{ELU}(x)`.
     """
+
     domain = constraints.real
     codomain = constraints.positive
     bijective = True
@@ -27,7 +29,9 @@ class ELUTransform(Transform):
         return F.elu(x)
 
     def _inverse(self, y, eps=1e-8):
-        return torch.max(y, torch.zeros_like(y)) + torch.min(torch.log1p(y + eps), torch.zeros_like(y))
+        return torch.max(y, torch.zeros_like(y)) + torch.min(
+            torch.log1p(y + eps), torch.zeros_like(y)
+        )
 
     def log_abs_det_jacobian(self, x, y):
         return -F.relu(-x)
@@ -41,6 +45,7 @@ def elu():
     """
     return ELUTransform()
 
+
 # TODO: Move upstream
 
 
@@ -48,8 +53,9 @@ class LeakyReLUTransform(Transform):
     r"""
     Bijective transform via the mapping :math:`y = \text{LeakyReLU}(x)`.
     """
+
     domain = constraints.real
-    codomain = constraints.positive
+    codomain = constraints.real
     bijective = True
     sign = +1
 
@@ -63,7 +69,9 @@ class LeakyReLUTransform(Transform):
         return F.leaky_relu(y, negative_slope=100.0)
 
     def log_abs_det_jacobian(self, x, y):
-        return torch.where(x >= 0., torch.zeros_like(x), torch.ones_like(x) * math.log(0.01))
+        return torch.where(
+            x >= 0.0, torch.zeros_like(x), torch.ones_like(x) * math.log(0.01)
+        )
 
 
 def leaky_relu():

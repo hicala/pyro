@@ -11,19 +11,20 @@ from pyro.infer.importance import Importance
 from pyro.infer.mcmc.api import MCMC
 from pyro.infer.mcmc.hmc import HMC
 from pyro.infer.mcmc.nuts import NUTS
-from pyro.infer.predictive import Predictive
+from pyro.infer.mcmc.rwkernel import RandomWalkKernel
+from pyro.infer.predictive import MHResampler, Predictive, WeighedPredictive
 from pyro.infer.renyi_elbo import RenyiELBO
 from pyro.infer.rws import ReweightedWakeSleep
 from pyro.infer.smcfilter import SMCFilter
 from pyro.infer.svgd import SVGD, IMQSteinKernel, RBFSteinKernel
 from pyro.infer.svi import SVI
-from pyro.infer.tracetmc_elbo import TraceTMC_ELBO
 from pyro.infer.trace_elbo import JitTrace_ELBO, Trace_ELBO
 from pyro.infer.trace_mean_field_elbo import JitTraceMeanField_ELBO, TraceMeanField_ELBO
 from pyro.infer.trace_mmd import Trace_MMD
 from pyro.infer.trace_tail_adaptive_elbo import TraceTailAdaptive_ELBO
 from pyro.infer.traceenum_elbo import JitTraceEnum_ELBO, TraceEnum_ELBO
 from pyro.infer.tracegraph_elbo import JitTraceGraph_ELBO, TraceGraph_ELBO
+from pyro.infer.tracetmc_elbo import TraceTMC_ELBO
 from pyro.infer.util import enable_validation, is_validation_enabled
 
 __all__ = [
@@ -43,8 +44,10 @@ __all__ = [
     "JitTraceMeanField_ELBO",
     "JitTrace_ELBO",
     "MCMC",
+    "MHResampler",
     "NUTS",
     "Predictive",
+    "RandomWalkKernel",
     "RBFSteinKernel",
     "RenyiELBO",
     "ReweightedWakeSleep",
@@ -60,4 +63,5 @@ __all__ = [
     "TraceTailAdaptive_ELBO",
     "Trace_ELBO",
     "Trace_MMD",
+    "WeighedPredictive",
 ]

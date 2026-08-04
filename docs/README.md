@@ -1,3 +1,9 @@
+<!--
+Copyright Contributors to the Pyro project.
+
+SPDX-License-Identifier: Apache-2.0
+-->
+
 # Documentation #
 Pyro Documentation is supported by [Sphinx](http://www.sphinx-doc.org/en/stable/). 
 To build the docs, run from the toplevel directory:
@@ -9,6 +15,8 @@ make docs
 ```
 pip install -r requirements.txt
 ```
+
+Note that you will need to install [graphviz](https://www.graphviz.org/) separately.
 
 ## Workflow ##
 To change the documentation, update the `*.rst` files in `source`.

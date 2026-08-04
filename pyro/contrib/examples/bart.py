@@ -11,10 +11,11 @@ import os
 import subprocess
 import sys
 import urllib
+from functools import partial
 
 import torch
 
-from pyro.contrib.examples.util import get_data_directory, _mkdir_p
+from pyro.contrib.examples.util import _mkdir_p, get_data_directory
 
 DATA = get_data_directory(__file__)
 
@@ -31,7 +32,9 @@ SOURCE_FILES = [
     "date-hour-soo-dest-2018.csv.gz",
     "date-hour-soo-dest-2019.csv.gz",
 ]
-CACHE_URL = "https://d2hg8soec8ck9v.cloudfront.net/datasets/bart_full.pkl.bz2"
+CACHE_URL = (
+    "https://github.com/pyro-ppl/datasets/blob/master/bart_full.pkl.bz2?raw=true"
+)
 
 
 def _load_hourly_od(basename):
@@ -120,18 +123,21 @@ def load_bart_od():
         except urllib.error.HTTPError:
             logging.debug("cache miss, preprocessing from scratch")
     if os.path.exists(pkl_file):
-        return torch.load(pkl_file)
+        return torch.load(pkl_file, weights_only=False)
 
-    filenames = multiprocessing.Pool(len(SOURCE_FILES)).map(_load_hourly_od, SOURCE_FILES)
-    datasets = list(map(torch.load, filenames))
+    filenames = multiprocessing.Pool(len(SOURCE_FILES)).map(
+        _load_hourly_od, SOURCE_FILES
+    )
+    datasets = list(map(partial(torch.load, weights_only=False), filenames))
 
     stations = sorted(set().union(*(d["stations"].keys() for d in datasets)))
     min_time = min(int(d["rows"][:, 0].min()) for d in datasets)
     max_time = max(int(d["rows"][:, 0].max()) for d in datasets)
     num_rows = max_time - min_time + 1
-    start_date = datasets[0]["start_date"] + datetime.timedelta(hours=min_time),
-    logging.info("Loaded data from {} stations, {} hours"
-                 .format(len(stations), num_rows))
+    start_date = (datasets[0]["start_date"] + datetime.timedelta(hours=min_time),)
+    logging.info(
+        "Loaded data from {} stations, {} hours".format(len(stations), num_rows)
+    )
 
     result = torch.zeros(num_rows, len(stations), len(stations))
     for dataset in datasets:
@@ -143,8 +149,9 @@ def load_bart_od():
         count = dataset["rows"][:, 3].float()
         result[time, origin, destin] = count
         dataset.clear()
-    logging.info("Loaded {} shaped data of mean {:0.3g}"
-                 .format(result.shape, result.mean()))
+    logging.info(
+        "Loaded {} shaped data of mean {:0.3g}".format(result.shape, result.mean())
+    )
 
     dataset = {
         "stations": stations,
@@ -174,6 +181,8 @@ if __name__ == "__main__":
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
-    logging.basicConfig(format='%(relativeCreated) 9d %(message)s',
-                        level=logging.DEBUG if args.verbose else logging.INFO)
+    logging.basicConfig(
+        format="%(relativeCreated) 9d %(message)s",
+        level=logging.DEBUG if args.verbose else logging.INFO,
+    )
     load_bart_od()

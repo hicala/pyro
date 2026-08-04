@@ -13,7 +13,7 @@ please don't hesitate to ask a question on our `forum <https://forum.pyro.ai/>`_
 New users: getting from zero to one
 ------------------------------------
 If you're new to probabilistic programming or variational inference,
-you might want to start by reading the series :ref:`introductory-tutorials`.
+you might want to start by reading the series :ref:`introductory-tutorials`, especially the :doc:`Introduction to Pyro <intro_long>`.
 If you're new to PyTorch, you may also benefit from reading the official introduction `"Deep Learning with PyTorch." <https://pytorch.org/tutorials/beginner/deep_learning_60min_blitz.html>`_
 
 After that, you're ready to get started using Pyro! (Yes, really!)
@@ -22,7 +22,8 @@ and look carefully through the series :ref:`practical-pyro-and-pytorch`,
 especially the :doc:`first Bayesian regression tutorial <bayesian_regression>`.
 This tutorial goes step-by-step through solving a simple Bayesian machine learning problem with Pyro,
 grounding the concepts from the introductory tutorials in runnable code.
-Industry users interested in serving predictions from a trained model in C++ should also read :doc:`the PyroModule tutorial <modules>`.
+Users interested in integrating with existing PyTorch training and serving infrastructure should also read :doc:`the PyroModule tutorial <modules>`
+and look at the :doc:`SVI with PyTorch <svi_torch>` and :doc:`SVI with Lightning <svi_lightning>` examples.
 
 Most users who reach this point will also find our :doc:`guide to tensor shapes in Pyro <tensor_shapes>` essential reading.
 Pyro makes extensive use of the behavior of `"array broadcasting" <https://numpy.org/doc/stable/user/basics.broadcasting.html>`_
@@ -76,11 +77,12 @@ List of Tutorials
    :caption: Introductory Tutorials
    :name: introductory-tutorials
 
-   intro_part_i
-   intro_part_ii
+   intro_long
+   model_rendering
    svi_part_i
    svi_part_ii
    svi_part_iii
+   svi_part_iv
 
 .. toctree::
    :maxdepth: 1
@@ -91,8 +93,13 @@ List of Tutorials
    bayesian_regression_ii
    tensor_shapes
    modules
+   workflow
+   prior_predictive
    jit
+   svi_torch
    svi_horovod
+   svi_lightning
+   svi_flow_guide
 
 .. toctree::
    :maxdepth: 1
@@ -102,12 +109,14 @@ List of Tutorials
    vae
    ss-vae
    cvae
-   normalizing_flows_i
+   normalizing_flows_intro
+   vae_flow_prior
    dmm
    air
-   scanvi
    cevae
    sparse_gamma
+   prodlda
+   scanvi
 
 .. toctree::
    :maxdepth: 1
@@ -149,6 +158,7 @@ List of Tutorials
    stable
    forecast_simple
    timeseries
+   reconciling_experts
 
 .. toctree::
    :maxdepth: 1
@@ -169,6 +179,15 @@ List of Tutorials
    epi_sir
    epi_regional
    sir_hmc
+   logistic-growth
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Application: Biological sequences
+   :name: biological-sequences
+
+   mue_profile
+   mue_factor
 
 .. toctree::
    :maxdepth: 1
@@ -198,6 +217,7 @@ List of Tutorials
    inclined_plane
    RSA-implicature
    RSA-hyperbole
+   predictive_deterministic
 
 .. toctree::
    :maxdepth: 1
@@ -209,6 +229,14 @@ List of Tutorials
    contrib_funsor_intro_i
    contrib_funsor_intro_ii
    hmm_funsor
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Deprecated
+   :name: deprecated
+
+   intro_part_i
+   intro_part_ii
 
 Indices and tables
 ==================

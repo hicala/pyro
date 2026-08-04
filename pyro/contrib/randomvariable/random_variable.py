@@ -4,52 +4,72 @@
 from typing import Union
 
 from torch import Tensor
+
 from pyro.distributions import TransformedDistribution
 from pyro.distributions.transforms import (
-    Transform,
-    AffineTransform,
     AbsTransform,
-    PowerTransform,
+    AffineTransform,
     ExpTransform,
-    TanhTransform,
+    PowerTransform,
+    SigmoidTransform,
     SoftmaxTransform,
-    SigmoidTransform
+    TanhTransform,
+    Transform,
 )
 
 
 class RVMagicOps:
-    """Mixin class for overloading __magic__ operations on random variables.
-    """
+    """Mixin class for overloading __magic__ operations on random variables."""
 
     def __add__(self, x: Union[float, Tensor]):
-        return RandomVariable(TransformedDistribution(self.distribution, AffineTransform(x, 1)))
+        return RandomVariable(
+            TransformedDistribution(self.distribution, AffineTransform(x, 1))
+        )
 
     def __radd__(self, x: Union[float, Tensor]):
-        return RandomVariable(TransformedDistribution(self.distribution, AffineTransform(x, 1)))
+        return RandomVariable(
+            TransformedDistribution(self.distribution, AffineTransform(x, 1))
+        )
 
     def __sub__(self, x: Union[float, Tensor]):
-        return RandomVariable(TransformedDistribution(self.distribution, AffineTransform(-x, 1)))
+        return RandomVariable(
+            TransformedDistribution(self.distribution, AffineTransform(-x, 1))
+        )
 
     def __rsub__(self, x: Union[float, Tensor]):
-        return RandomVariable(TransformedDistribution(self.distribution, AffineTransform(x, -1)))
+        return RandomVariable(
+            TransformedDistribution(self.distribution, AffineTransform(x, -1))
+        )
 
     def __mul__(self, x: Union[float, Tensor]):
-        return RandomVariable(TransformedDistribution(self.distribution, AffineTransform(0, x)))
+        return RandomVariable(
+            TransformedDistribution(self.distribution, AffineTransform(0, x))
+        )
 
     def __rmul__(self, x: Union[float, Tensor]):
-        return RandomVariable(TransformedDistribution(self.distribution, AffineTransform(0, x)))
+        return RandomVariable(
+            TransformedDistribution(self.distribution, AffineTransform(0, x))
+        )
 
     def __truediv__(self, x: Union[float, Tensor]):
-        return RandomVariable(TransformedDistribution(self.distribution, AffineTransform(0, 1/x)))
+        return RandomVariable(
+            TransformedDistribution(self.distribution, AffineTransform(0, 1 / x))
+        )
 
     def __neg__(self):
-        return RandomVariable(TransformedDistribution(self.distribution, AffineTransform(0, -1)))
+        return RandomVariable(
+            TransformedDistribution(self.distribution, AffineTransform(0, -1))
+        )
 
     def __abs__(self):
-        return RandomVariable(TransformedDistribution(self.distribution, AbsTransform()))
+        return RandomVariable(
+            TransformedDistribution(self.distribution, AbsTransform())
+        )
 
     def __pow__(self, x):
-        return RandomVariable(TransformedDistribution(self.distribution, PowerTransform(x)))
+        return RandomVariable(
+            TransformedDistribution(self.distribution, PowerTransform(x))
+        )
 
 
 class RVChainOps:
@@ -73,7 +93,7 @@ class RVChainOps:
         return abs(self)
 
     def pow(self, x):
-        return self ** x
+        return self**x
 
     def neg(self):
         return -self

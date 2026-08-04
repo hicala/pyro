@@ -1,9 +1,14 @@
+# Copyright Contributors to the Pyro project.
+#
+# SPDX-License-Identifier: Apache-2.0
+
 run_outputs*
 .DS_Store
 .benchmarks
 data
 .data
 results
+*.csv
 examples/*/processed
 examples/*/results
 examples/*/raw
@@ -18,6 +23,13 @@ pyro/_version.py
 processed
 raw
 *.pkl
+*.fasta
+baseline_net_q1.pth
+cvae_net_q1.pth
+cvae_plot_q1.png
+prep_seal_data.csv
+results.csv
+tutorial/source/model.pdf
 
 # Logs
 logs
@@ -81,7 +93,6 @@ coverage.xml
 *,cover
 .hypothesis/
 *.out
-adam.unittest.save
 
 # Translations
 *.mo
@@ -137,3 +148,6 @@ ENV/
 *.swo
 *.swp
 *~
+
+# mypy cache
+.mypy_cache

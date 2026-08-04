@@ -3,8 +3,10 @@
 
 import math
 import numbers
+from typing import Callable, List, Optional, Tuple, Union
 
 import torch
+from torch.fft import irfft, rfft
 
 from .tensor_utils import next_fast_len
 
@@ -77,7 +79,9 @@ def split_gelman_rubin(input, chain_dim=0, sample_dim=1):
     new_input = torch.stack([input[:, :N_half], input[:, -N_half:]], dim=1)
     new_input = new_input.reshape((-1, N_half) + input.shape[2:])
     split_rhat = gelman_rubin(new_input)
-    return split_rhat.squeeze(max(sample_dim, chain_dim)).squeeze(min(sample_dim, chain_dim))
+    return split_rhat.squeeze(max(sample_dim, chain_dim)).squeeze(
+        min(sample_dim, chain_dim)
+    )
 
 
 def autocorrelation(input, dim=0):
@@ -90,10 +94,6 @@ def autocorrelation(input, dim=0):
     :param int dim: the dimension to calculate autocorrelation.
     :returns torch.Tensor: autocorrelation of ``input``.
     """
-    if (not input.is_cuda) and (not torch.backends.mkl.is_available()):
-        raise NotImplementedError("For CPU tensor, this method is only supported "
-                                  "with MKL installed.")
-
     # Adapted from Stan implementation
     # https://github.com/stan-dev/math/blob/develop/stan/math/prim/mat/fun/autocorrelation.hpp
     N = input.size(dim)
@@ -105,22 +105,26 @@ def autocorrelation(input, dim=0):
 
     # centering and padding x
     centered_signal = input - input.mean(dim=-1, keepdim=True)
-    pad = torch.zeros(input.shape[:-1] + (M2 - N,), dtype=input.dtype, device=input.device)
-    centered_signal = torch.cat([centered_signal, pad], dim=-1)
 
     # Fourier transform
-    freqvec = torch.rfft(centered_signal, signal_ndim=1, onesided=False)
+    freqvec = torch.view_as_real(rfft(centered_signal, n=M2))
     # take square of magnitude of freqvec (or freqvec x freqvec*)
-    freqvec_gram = freqvec.pow(2).sum(-1, keepdim=True)
-    freqvec_gram = torch.cat([freqvec_gram, torch.zeros(freqvec_gram.shape, dtype=input.dtype,
-                                                        device=input.device)], dim=-1)
+    freqvec_gram = freqvec.pow(2).sum(-1)
     # inverse Fourier transform
-    autocorr = torch.irfft(freqvec_gram, signal_ndim=1, onesided=False)
+    autocorr = irfft(freqvec_gram, n=M2)
 
-    # truncate and normalize the result, then transpose back to original shape
+    # truncate and normalize the result, setting autocorrelation to 1 for all
+    # constant channels
     autocorr = autocorr[..., :N]
-    autocorr = autocorr / torch.tensor(range(N, 0, -1), dtype=input.dtype, device=input.device)
-    autocorr = autocorr / autocorr[..., :1]
+    autocorr = autocorr / torch.tensor(
+        range(N, 0, -1), dtype=input.dtype, device=input.device
+    )
+    variance = autocorr[..., :1]
+    constant = (variance == 0).expand_as(autocorr)
+    autocorr = autocorr / variance.clamp(min=torch.finfo(variance.dtype).tiny)
+    autocorr[constant] = 1
+
+    # transpose back to original shape
     return autocorr.transpose(dim, -1)
 
 
@@ -145,8 +149,11 @@ def _cummin(input):
     # FIXME: is there a better trick to find accumulate min of a sequence?
     N = input.size(0)
     input_tril = input.unsqueeze(0).repeat((N,) + (1,) * input.dim())
-    triu_mask = (torch.ones(N, N, dtype=input.dtype, device=input.device)
-                 .triu(diagonal=1).reshape((N, N) + (1,) * (input.dim() - 1)))
+    triu_mask = (
+        torch.ones(N, N, dtype=input.dtype, device=input.device)
+        .triu(diagonal=1)
+        .reshape((N, N) + (1,) * (input.dim() - 1))
+    )
     triu_mask = triu_mask.expand((N, N) + input.shape[1:]) > 0.5
     input_tril.masked_fill_(triu_mask, input.max())
     return input_tril.min(dim=1)[0]
@@ -255,6 +262,69 @@ def quantile(input, probs, dim=0):
     return quantiles if probs.shape != torch.Size([]) else quantiles.squeeze(dim)
 
 
+def weighed_quantile(
+    input: torch.Tensor,
+    probs: Union[List[float], Tuple[float, ...], torch.Tensor],
+    log_weights: torch.Tensor,
+    dim: int = 0,
+) -> torch.Tensor:
+    """
+    Computes quantiles of weighed ``input`` samples at ``probs``.
+
+    :param torch.Tensor input: the input tensor.
+    :param list probs: quantile positions.
+    :param torch.Tensor log_weights: sample weights tensor.
+    :param int dim: dimension to take quantiles from ``input``.
+    :returns torch.Tensor: quantiles of ``input`` at ``probs``.
+
+    **Example:**
+
+    .. doctest::
+
+        >>> from pyro.ops.stats import weighed_quantile
+        >>> import torch
+        >>> input = torch.tensor([[10.0, 50.0, 40.0], [20.0, 30.0, 0.0]])
+        >>> probs = torch.tensor([0.2, 0.8])
+        >>> log_weights = torch.tensor([0.4, 0.5, 0.1]).log()
+        >>> result = weighed_quantile(input, probs, log_weights, -1)
+        >>> torch.testing.assert_close(result, torch.tensor([[40.4, 47.6], [9.0, 26.4]]))
+    """
+    dim = dim if dim >= 0 else (len(input.shape) + dim)
+    if isinstance(probs, (list, tuple)):
+        probs = torch.tensor(probs, dtype=input.dtype, device=input.device)
+    assert isinstance(probs, torch.Tensor)
+    # Calculate normalized weights
+    weights = (log_weights - torch.logsumexp(log_weights, 0)).exp()
+    # Sort input and weights
+    sorted_input, sorting_indices = input.sort(dim)
+    weights = weights[sorting_indices].cumsum(dim)
+    # Scale weights to be between zero and one
+    weights = weights - weights.min(dim, keepdim=True)[0]
+    weights = weights / weights.max(dim, keepdim=True)[0]
+    # Calculate indices
+    indices_above = (
+        (weights[..., None] <= probs)
+        .sum(dim, keepdim=True)
+        .swapaxes(dim, -1)
+        .clamp(max=input.size(dim) - 1)[..., 0]
+    )
+    indices_below = (indices_above - 1).clamp(min=0)
+    # Calculate below and above qunatiles
+    quantiles_below = sorted_input.gather(dim, indices_below)
+    quantiles_above = sorted_input.gather(dim, indices_above)
+    # Calculate weights for below and above quantiles
+    probs_shape = [None] * dim + [slice(None)] + [None] * (len(input.shape) - dim - 1)
+    expanded_probs_shape = list(input.shape)
+    expanded_probs_shape[dim] = len(probs)
+    probs = probs[tuple(probs_shape)].expand(*expanded_probs_shape)
+    weights_below = weights.gather(dim, indices_below)
+    weights_above = weights.gather(dim, indices_above)
+    weights_below = (weights_above - probs) / (weights_above - weights_below)
+    weights_above = 1 - weights_below
+    # Return quantiles
+    return weights_below * quantiles_below + weights_above * quantiles_above
+
+
 def pi(input, prob, dim=0):
     """
     Computes percentile interval which assigns equal probability mass
@@ -282,9 +352,13 @@ def hpdi(input, prob, dim=0):
     mass = input.size(dim)
     index_length = int(prob * mass)
     intervals_left = sorted_input.index_select(
-        dim, torch.tensor(range(mass - index_length), dtype=torch.long, device=input.device))
+        dim,
+        torch.tensor(range(mass - index_length), dtype=torch.long, device=input.device),
+    )
     intervals_right = sorted_input.index_select(
-        dim, torch.tensor(range(index_length, mass), dtype=torch.long, device=input.device))
+        dim,
+        torch.tensor(range(index_length, mass), dtype=torch.long, device=input.device),
+    )
     intervals_length = intervals_right - intervals_left
     index_start = intervals_length.argmin(dim)
     indices = torch.stack([index_start, index_start + index_length], dim)
@@ -301,8 +375,10 @@ def _weighted_mean(input, log_weights, dim=0, keepdim=False):
 
 def _weighted_variance(input, log_weights, dim=0, keepdim=False, unbiased=True):
     # Ref: https://en.wikipedia.org/wiki/Weighted_arithmetic_mean#Frequency_weights
-    deviation_squared = (input - _weighted_mean(input, log_weights, dim, keepdim=True)).pow(2)
-    correction = log_weights.size(0) / (log_weights.size(0) - 1.) if unbiased else 1.
+    deviation_squared = (
+        input - _weighted_mean(input, log_weights, dim, keepdim=True)
+    ).pow(2)
+    correction = log_weights.size(0) / (log_weights.size(0) - 1.0) if unbiased else 1.0
     return _weighted_mean(deviation_squared, log_weights, dim, keepdim) * correction
 
 
@@ -322,7 +398,9 @@ def waic(input, log_weights=None, pointwise=False, dim=0):
     :returns tuple: tuple of WAIC and effective number of parameters.
     """
     if log_weights is None:
-        log_weights = torch.zeros(input.size(dim), dtype=input.dtype, device=input.device)
+        log_weights = torch.zeros(
+            input.size(dim), dtype=input.dtype, device=input.device
+        )
 
     # computes log pointwise predictive density: formula (3) of [1]
     dim = input.dim() + dim if dim < 0 else dim
@@ -365,7 +443,7 @@ def fit_generalized_pareto(X):
 
     # b = k / sigma
     bs = 1.0 - math.sqrt(M) / (torch.arange(1, M + 1, dtype=torch.double) - 0.5).sqrt()
-    bs /= 3.0 * X[int(N/4 - 0.5)]
+    bs /= 3.0 * X[int(N / 4 - 0.5)]
     bs += 1 / X[-1]
 
     ks = torch.log1p(-bs.unsqueeze(-1) * X).mean(-1)
@@ -413,8 +491,10 @@ def crps_empirical(pred, truth):
     :rtype: torch.Tensor
     """
     if pred.shape[1:] != (1,) * (pred.dim() - truth.dim() - 1) + truth.shape:
-        raise ValueError("Expected pred to have one extra sample dim on left. "
-                         "Actual shapes: {} versus {}".format(pred.shape, truth.shape))
+        raise ValueError(
+            "Expected pred to have one extra sample dim on left. "
+            "Actual shapes: {} versus {}".format(pred.shape, truth.shape)
+        )
     opts = dict(device=pred.device, dtype=pred.dtype)
     num_samples = pred.size(0)
     if num_samples == 1:
@@ -422,8 +502,104 @@ def crps_empirical(pred, truth):
 
     pred = pred.sort(dim=0).values
     diff = pred[1:] - pred[:-1]
-    weight = (torch.arange(1, num_samples, **opts) *
-              torch.arange(num_samples - 1, 0, -1, **opts))
+    weight = torch.arange(1, num_samples, **opts) * torch.arange(
+        num_samples - 1, 0, -1, **opts
+    )
     weight = weight.reshape(weight.shape + (1,) * (diff.dim() - 1))
 
     return (pred - truth).abs().mean(0) - (diff * weight).sum(0) / num_samples**2
+
+
+def energy_score_empirical(
+    pred: torch.Tensor,
+    truth: torch.Tensor,
+    pred_batch_size: Optional[int] = None,
+    cdist: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = torch.cdist,
+) -> torch.Tensor:
+    r"""
+    Computes negative Energy Score ES* (see equation 22 in [1]) between a
+    set of multivariate samples ``pred`` and a true data vector ``truth``. Running time
+    is quadratic in the number of samples ``n``. In case of univariate samples
+    the output coincides with the CRPS::
+
+        ES* = E|pred - truth| - 1/2 E|pred - pred'|
+
+    Note that for a single sample this reduces to the Euclidean norm of the difference between
+    the sample ``pred`` and the ``truth``.
+
+    This is a strictly proper score so that for ``pred`` distirbuted according to a
+    distribution :math:`P` and ``truth`` distributed according to a distribution :math:`Q`
+    we have :math:`ES^{*}(P,Q) \ge ES^{*}(Q,Q)` with equality holding if and only if :math:`P=Q`, i.e.
+    if :math:`P` and :math:`Q` have the same multivariate distribution (it is not sufficient for
+    :math:`P` and :math:`Q` to have the same marginals in order for equality to hold).
+
+    **References**
+
+    [1] Tilmann Gneiting, Adrian E. Raftery (2007)
+        `Strictly Proper Scoring Rules, Prediction, and Estimation`
+        https://www.stat.washington.edu/raftery/Research/PDF/Gneiting2007jasa.pdf
+
+    :param torch.Tensor pred: A set of sample predictions batched on the second leftmost dim.
+        The leftmost dim is that of the multivariate sample.
+    :param torch.Tensor truth: A tensor of true observations with same shape as ``pred`` except
+        for the second leftmost dim which can have any value or be omitted.
+    :param int pred_batch_size: If specified the predictions will be batched before calculation
+        according to the specified batch size in order to reduce memory consumption.
+    :param callable cdist: Function for calculating an euclidean distance (see
+        https://github.com/pytorch/pytorch/issues/42479 for why you might need to change this in order to
+        balance speed versus accuracy). Default is :any:`torch.cdist`.
+
+    :return: A tensor of shape ``truth.shape``.
+    :rtype: torch.Tensor
+    """
+    if pred.dim() == (truth.dim() + 1):
+        remove_leftmost_dim = True
+        truth = truth[..., None, :]
+    elif pred.dim() == truth.dim():
+        remove_leftmost_dim = False
+    else:
+        raise ValueError(
+            "Expected pred to have at most one extra dim versus truth."
+            "Actual shapes: {} versus {}".format(pred.shape, truth.shape)
+        )
+
+    if pred_batch_size is None:
+        retval = (
+            cdist(pred, truth).mean(dim=-2)
+            - 0.5 * cdist(pred, pred).mean(dim=[-1, -2])[..., None]
+        )
+    else:
+        # Divide predictions into batches
+        pred_len = pred.shape[-2]
+        pred_batches = []
+        while pred.numel() > 0:
+            pred_batches.append(pred[..., :pred_batch_size, :])
+            pred = pred[..., pred_batch_size:, :]
+        # Calculate predictions distance to truth
+        retval = (
+            torch.stack(
+                [cdist(pred_batch, truth).sum(dim=-2) for pred_batch in pred_batches],
+                dim=0,
+            ).sum(dim=0)
+            / pred_len
+        )
+        # Calculate predictions self distance
+        for aux_pred_batch in pred_batches:
+            retval = (
+                retval
+                - 0.5
+                * torch.stack(
+                    [
+                        cdist(pred_batch, aux_pred_batch).sum(dim=[-1, -2])
+                        for pred_batch in pred_batches
+                    ],
+                    dim=0,
+                ).sum(dim=0)[..., None]
+                / pred_len
+                / pred_len
+            )
+
+    if remove_leftmost_dim:
+        retval = retval[..., 0]
+
+    return retval

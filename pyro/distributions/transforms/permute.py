@@ -2,11 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import torch
-from torch.distributions import constraints
 from torch.distributions.transforms import Transform
 from torch.distributions.utils import lazy_property
 
-from pyro.distributions.util import copy_docs_from
+from pyro.distributions import constraints
+
+from ..util import copy_docs_from
 
 
 @copy_docs_from(Transform)
@@ -43,7 +44,6 @@ class Permute(Transform):
 
     """
 
-    codomain = constraints.real_vector
     bijective = True
     volume_preserving = True
 
@@ -55,14 +55,21 @@ class Permute(Transform):
 
         self.permutation = permutation
         self.dim = dim
-        self.event_dim = -dim
+
+    @constraints.dependent_property(is_discrete=False)
+    def domain(self):
+        return constraints.independent(constraints.real, -self.dim)
+
+    @constraints.dependent_property(is_discrete=False)
+    def codomain(self):
+        return constraints.independent(constraints.real, -self.dim)
 
     @lazy_property
     def inv_permutation(self):
         result = torch.empty_like(self.permutation, dtype=torch.long)
-        result[self.permutation] = torch.arange(self.permutation.size(0),
-                                                dtype=torch.long,
-                                                device=self.permutation.device)
+        result[self.permutation] = torch.arange(
+            self.permutation.size(0), dtype=torch.long, device=self.permutation.device
+        )
         return result
 
     def _call(self, x):
@@ -95,7 +102,9 @@ class Permute(Transform):
         determinant is -1 or +1), and so returning a vector of zeros works.
         """
 
-        return torch.zeros(x.size()[:-self.event_dim], dtype=x.dtype, layout=x.layout, device=x.device)
+        return torch.zeros(
+            x.size()[: -self.event_dim], dtype=x.dtype, layout=x.layout, device=x.device
+        )
 
     def with_cache(self, cache_size=1):
         if self._cache_size == cache_size:
@@ -121,7 +130,11 @@ def permute(input_dim, permutation=None, dim=-1):
     """
     if dim < -1 or not isinstance(input_dim, int):
         if len(input_dim) != -dim:
-            raise ValueError('event shape {} must have same length as event_dim {}'.format(input_dim, -dim))
+            raise ValueError(
+                "event shape {} must have same length as event_dim {}".format(
+                    input_dim, -dim
+                )
+            )
         input_dim = input_dim[dim]
 
     if permutation is None:

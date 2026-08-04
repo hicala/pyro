@@ -17,14 +17,17 @@ def einsum(equation, *operands):
     """
     # rename symbols to support PyTorch 0.4.1 and earlier,
     # which allow only symbols a-z.
-    symbols = sorted(set(equation) - set(',->'))
-    rename = dict(zip(symbols, 'abcdefghijklmnopqrstuvwxyz'))
-    equation = ''.join(rename.get(s, s) for s in equation)
+    symbols = sorted(set(equation) - set(",->"))
+    rename = dict(zip(symbols, "abcdefghijklmnopqrstuvwxyz"))
+    equation = "".join(rename.get(s, s) for s in equation)
 
-    inputs, output = equation.split('->')
+    inputs, output = equation.split("->")
     if inputs == output:
-        return operands[0][...]  # create a new object
-    inputs = inputs.split(',')
+        # Originally we return `operands[0][...]` but that caused
+        # memory leak in PyTorch >= 1.11 (issue #3068). Hence we
+        # return `operands[0].clone()` here.
+        return operands[0].clone()  # create a new object
+    inputs = inputs.split(",")
 
     shifts = []
     exp_operands = []
@@ -38,8 +41,9 @@ def einsum(equation, *operands):
         exp_operands.append((operand - shift).exp())
 
         # permute shift to match output
-        shift = shift.reshape(torch.Size(size for size, dim in zip(operand.shape, dims)
-                                         if dim in output))
+        shift = shift.reshape(
+            torch.Size(size for size, dim in zip(operand.shape, dims) if dim in output)
+        )
         if shift.dim():
             shift = shift.reshape((1,) * (len(output) - shift.dim()) + shift.shape)
             dims = [dim for dim in dims if dim in output]
